@@ -1,0 +1,5 @@
+apps/backend/.env
+apps/frontend/.env
+
+apps/backend/venv/
+.env
