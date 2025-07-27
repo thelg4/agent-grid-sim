@@ -1,133 +1,5 @@
-# import logging
-# from app.env.grid import Grid
-# from app.agents.builder import BuilderAgent
-# from app.agents.scout import ScoutAgent
-# from app.agents.strategist import StrategistAgent
-# from app.langgraph.agent_flow import build_agent_flow
-# from app.tools.message import Message
-
-# logger = logging.getLogger(__name__)
-
-# class Simulation:
-#     def __init__(self, width: int = 6, height: int = 5):
-#         self.grid = Grid(width, height)
-#         self.agents = {
-#             "builder": BuilderAgent("builder", self.grid),
-#             "scout": ScoutAgent("scout", self.grid),
-#             "strategist": StrategistAgent("strategist", self.grid),
-#         }
-
-#         # Place agents in starting positions
-#         success = []
-#         success.append(self.grid.place_agent("builder", (0, 0)))
-#         success.append(self.grid.place_agent("strategist", (1, 0)))
-#         success.append(self.grid.place_agent("scout", (2, 0)))
-        
-#         if not all(success):
-#             logger.warning("Some agents could not be placed in initial positions")
-
-#         self.flow = build_agent_flow()
-#         self.state = {
-#             "agents": self.agents,
-#             "messages": [],
-#             "grid": self.grid,
-#             "logs": [],
-#             "step_count": 0,
-#             "errors": []
-#         }
-        
-#         logger.info(f"Simulation initialized with {len(self.agents)} agents on {width}x{height} grid")
-
-#     def step(self) -> dict:
-#         """Execute one simulation step with error handling."""
-#         try:
-#             self.state["step_count"] += 1
-#             step_num = self.state["step_count"]
-            
-#             logger.info(f"Starting simulation step {step_num}")
-            
-#             # Prepare state for the flow (only grid and messages)
-#             flow_state = {
-#                 "grid": self.grid,
-#                 "messages": self.state["messages"]
-#             }
-            
-#             # Run the agent flow
-#             result_state = self.flow.invoke(flow_state)
-            
-#             # Update our state with the results
-#             self.state["messages"] = result_state["messages"]
-#             self.state["grid"] = result_state["grid"]
-            
-#             # Convert messages to logs for the frontend
-#             new_logs = []
-#             for msg in result_state["messages"]:
-#                 if hasattr(msg, 'content') and msg.content:
-#                     log_entry = f"[Step {step_num}] {msg.content}"
-#                     new_logs.append(log_entry)
-#                     logger.debug(f"Agent message: {msg.content}")
-            
-#             self.state["logs"].extend(new_logs)
-            
-#             # Limit log history to prevent memory issues
-#             if len(self.state["logs"]) > 100:
-#                 self.state["logs"] = self.state["logs"][-100:]
-            
-#             logger.info(f"Step {step_num} completed successfully with {len(new_logs)} new messages")
-            
-#             return {
-#                 "logs": self.state["logs"],
-#                 "grid": self.grid.serialize(),
-#                 "agents": {
-#                     agent_id: agent.get_status()
-#                     for agent_id, agent in self.agents.items()
-#                 },
-#                 "step_count": step_num,
-#                 "status": "success"
-#             }
-            
-#         except Exception as e:
-#             error_msg = f"Error in simulation step {self.state['step_count']}: {str(e)}"
-#             logger.error(error_msg, exc_info=True)
-            
-#             self.state["errors"].append(error_msg)
-#             self.state["logs"].append(f"[ERROR] {error_msg}")
-            
-#             # Return current state even if step failed
-#             return {
-#                 "logs": self.state["logs"],
-#                 "grid": self.grid.serialize(),
-#                 "agents": {
-#                     agent_id: agent.get_status()
-#                     for agent_id, agent in self.agents.items()
-#                 },
-#                 "step_count": self.state["step_count"],
-#                 "status": "error",
-#                 "error": error_msg
-#             }
-
-#     def get_grid_state(self) -> dict:
-#         """Get current grid state."""
-#         return self.grid.serialize()
-
-#     def get_logs(self) -> list[str]:
-#         """Get simulation logs."""
-#         return self.state["logs"]
-
-#     def get_agent_status(self) -> dict:
-#         """Get status of all agents."""
-#         try:
-#             return {
-#                 agent_id: agent.get_status()
-#                 for agent_id, agent in self.agents.items()
-#             }
-#         except Exception as e:
-#             logger.error(f"Error getting agent status: {e}")
-#             return {}
-
-# app/simulation.py
 import logging
-from typing import Dict, List
+from typing import Dict, List, Set
 from app.env.grid import Grid
 from app.agents.builder import BuilderAgent
 from app.agents.scout import ScoutAgent
@@ -169,6 +41,10 @@ class SimulationGoals:
 class Simulation:
     def __init__(self, width: int = 6, height: int = 5):
         self.grid = Grid(width, height)
+        
+        # Track exploration properly
+        self.visited_cells: Set[tuple[int, int]] = set()
+        
         self.agents = {
             "scout": ScoutAgent("scout", self.grid),
             "strategist": StrategistAgent("strategist", self.grid),
@@ -180,6 +56,11 @@ class Simulation:
         success.append(self.grid.place_agent("scout", (0, 0)))
         success.append(self.grid.place_agent("strategist", (1, 0)))
         success.append(self.grid.place_agent("builder", (2, 0)))
+        
+        # Mark starting positions as visited
+        self.visited_cells.add((0, 0))
+        self.visited_cells.add((1, 0))
+        self.visited_cells.add((2, 0))
         
         if not all(success):
             logger.warning("Some agents could not be placed in initial positions")
@@ -218,6 +99,9 @@ class Simulation:
             
             logger.info(f"Starting mission step {step_num}")
             
+            # Update visited cells before processing
+            self._update_visited_cells()
+            
             # Check mission status
             if step_num > SimulationGoals.MAX_STEPS:
                 self.state["mission_status"] = "TIMEOUT"
@@ -236,27 +120,37 @@ class Simulation:
                 "buildings_built": self._count_buildings()
             }
             
-            # Run the agent flow
+            # Run the agent flow (each agent acts once)
             result_state = self.flow.invoke(flow_state)
+
+            # DEBUG: Check grid state after each step
+            structure_count = self.grid.debug_grid_state()
+            logger.info(f"Step {step_num}: Grid has {structure_count} structures")
             
             # Update our state with the results
             self.state["messages"] = result_state["messages"]
             self.state["grid"] = result_state["grid"]
             
+            # Update visited cells after agent movements
+            self._update_visited_cells()
+            
             # Process new messages and extract meaningful actions
             new_logs = []
-            agent_actions = {"scout": [], "strategist": [], "builder": []}
             
-            for msg in result_state["messages"]:
+            # Get only the new messages from this step
+            step_messages = []
+            if len(result_state["messages"]) > len(self.state.get("previous_messages", [])):
+                start_idx = len(self.state.get("previous_messages", []))
+                step_messages = result_state["messages"][start_idx:]
+            
+            for msg in step_messages:
                 if hasattr(msg, 'content') and msg.content:
-                    # Categorize messages by agent
-                    sender = getattr(msg, 'sender', 'unknown')
-                    if sender in agent_actions:
-                        agent_actions[sender].append(msg.content)
-                    
                     log_entry = f"[Step {step_num}] {msg.content}"
                     new_logs.append(log_entry)
                     logger.debug(f"Agent message: {msg.content}")
+            
+            # Store previous messages for next step comparison
+            self.state["previous_messages"] = result_state["messages"].copy()
             
             # Add step summary with progress tracking
             exploration_progress = self._calculate_exploration_progress()
@@ -297,6 +191,7 @@ class Simulation:
                 "exploration_progress": exploration_progress,
                 "buildings_built": buildings_built,
                 "current_objectives": current_objectives,
+                "visited_cells": len(self.visited_cells),
                 "status": "success"
             }
             
@@ -320,28 +215,26 @@ class Simulation:
                 "error": error_msg
             }
 
+    def _update_visited_cells(self):
+        """Update the set of visited cells based on current agent positions"""
+        for agent_id, agent in self.agents.items():
+            position = self.grid.get_agent_position(agent_id)
+            if position:
+                self.visited_cells.add(position)
+                
+                # Also mark adjacent cells as "observed" for scout
+                if agent_id == "scout":
+                    x, y = position
+                    for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
+                        nx, ny = x + dx, y + dy
+                        if self.grid.is_within_bounds(nx, ny):
+                            self.visited_cells.add((nx, ny))
+
     def _calculate_exploration_progress(self) -> float:
-        """Calculate what percentage of the grid has been explored by agents."""
+        """Calculate what percentage of the grid has been explored."""
         total_cells = self.grid.width * self.grid.height
-        explored_cells = 0
-        
-        # Count cells that have been visited by agents or have structures
-        for (x, y), cell in self.grid.grid.items():
-            if cell.occupied_by or cell.structure:
-                explored_cells += 1
-        
-        # For demo purposes, also count cells adjacent to visited cells as "observed"
-        observed_cells = set()
-        for (x, y), cell in self.grid.grid.items():
-            if cell.occupied_by:
-                # Add adjacent cells as observed
-                for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-                    nx, ny = x + dx, y + dy
-                    if self.grid.is_within_bounds(nx, ny):
-                        observed_cells.add((nx, ny))
-        
-        total_explored = min(explored_cells + len(observed_cells), total_cells)
-        return total_explored / total_cells
+        explored_cells = len(self.visited_cells)
+        return min(explored_cells / total_cells, 1.0)
 
     def _count_buildings(self) -> int:
         """Count the number of buildings constructed."""
@@ -357,6 +250,7 @@ class Simulation:
         base_state["exploration_progress"] = self._calculate_exploration_progress()
         base_state["buildings_built"] = self._count_buildings()
         base_state["mission_status"] = self.state.get("mission_status", "ACTIVE")
+        base_state["visited_cells"] = len(self.visited_cells)
         return base_state
 
     def get_logs(self) -> list[str]:
