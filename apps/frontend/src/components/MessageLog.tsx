@@ -1,11 +1,11 @@
 export function MessageLog() {
   return (
-    <div className="border rounded-md p-4 bg-background mb-4 h-48 overflow-y-auto">
-      <h2 className="font-semibold text-lg mb-2">Message Log</h2>
-      <ul className="text-sm space-y-1">
-        <li>[Scout] Moved north.</li>
-        <li>[Strategist] Suggested building at (2, 3).</li>
-        <li>[Builder] Started construction.</li>
+    <div className="rounded-xl border bg-background p-6 shadow-sm h-48 overflow-y-auto space-y-2">
+      <h2 className="text-xl font-semibold mb-2">Message Log</h2>
+      <ul className="text-sm font-mono">
+        <li className="text-blue-500">[Scout] Moved north.</li>
+        <li className="text-green-600">[Strategist] Suggested building at (2, 3).</li>
+        <li className="text-yellow-600">[Builder] Started construction.</li>
       </ul>
     </div>
   );
