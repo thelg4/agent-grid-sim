@@ -163,6 +163,120 @@ async def reset_simulation():
     except Exception as e:
         logger.error(f"Error resetting simulation: {e}")
         raise HTTPException(status_code=500, detail="Failed to reset simulation")
+    
+@app.get("/api/debug")
+async def debug_info():
+    """Debug endpoint to inspect simulation state."""
+    try:
+        if not sim:
+            return {"error": "Simulation not initialized"}
+        
+        # Get detailed agent information
+        agents_debug = {}
+        for agent_id, agent in sim.agents.items():
+            agents_debug[agent_id] = {
+                "basic_status": agent.get_status(),
+                "memory_full": agent.memory,
+                "memory_count": len(agent.memory),
+                "position": sim.grid.get_agent_position(agent_id),
+                "agent_class": type(agent).__name__,
+            }
+            
+            # Add agent-specific debug info
+            if hasattr(agent, 'buildings_completed'):
+                agents_debug[agent_id]["buildings_completed"] = agent.buildings_completed
+                agents_debug[agent_id]["last_built_location"] = getattr(agent, 'last_built_location', None)
+                agents_debug[agent_id]["processed_messages"] = len(getattr(agent, 'processed_messages', set()))
+            
+            if hasattr(agent, 'visited_cells'):
+                agents_debug[agent_id]["cells_visited"] = len(agent.visited_cells)
+                agents_debug[agent_id]["visited_cells_list"] = list(agent.visited_cells)
+            
+            if hasattr(agent, 'suggested_locations'):
+                agents_debug[agent_id]["build_orders_issued"] = len(agent.suggested_locations)
+                agents_debug[agent_id]["suggested_locations"] = list(agent.suggested_locations)
+                agents_debug[agent_id]["scout_reports"] = len(getattr(agent, 'scout_reports', []))
+        
+        # Grid debug info
+        grid_debug = {
+            "dimensions": f"{sim.grid.width}x{sim.grid.height}",
+            "total_cells": sim.grid.width * sim.grid.height,
+            "agent_positions": sim.grid.agent_positions,
+            "cells_with_structures": [],
+            "cells_with_agents": [],
+        }
+        
+        # Find all cells with structures or agents
+        for (x, y), cell in sim.grid.grid.items():
+            if cell.structure:
+                grid_debug["cells_with_structures"].append({
+                    "position": (x, y),
+                    "structure": cell.structure,
+                    "occupied_by": cell.occupied_by
+                })
+            if cell.occupied_by:
+                grid_debug["cells_with_agents"].append({
+                    "position": (x, y),
+                    "agent": cell.occupied_by,
+                    "structure": cell.structure
+                })
+        
+        # Simulation state debug
+        sim_debug = {
+            "step_count": sim.state.get("step_count", 0),
+            "mission_status": sim.state.get("mission_status", "UNKNOWN"),
+            "exploration_progress": sim._calculate_exploration_progress(),
+            "buildings_built": sim._count_buildings(),
+            "visited_cells_count": len(sim.visited_cells),
+            "logs_count": len(sim.state.get("logs", [])),
+            "recent_logs": sim.state.get("logs", [])[-5:],  # Last 5 logs
+        }
+        
+        return {
+            "agents": agents_debug,
+            "grid": grid_debug,
+            "simulation": sim_debug,
+            "timestamp": "debug_info_generated"
+        }
+        
+    except Exception as e:
+        logger.error(f"Debug endpoint error: {e}")
+        return {"error": f"Debug failed: {str(e)}"}
+
+
+@app.get("/api/grid-raw")
+async def get_grid_raw():
+    """Get raw grid data for debugging."""
+    try:
+        if not sim:
+            return {"error": "Simulation not initialized"}
+        
+        # Return the raw grid state with all details
+        raw_cells = {}
+        for (x, y), cell in sim.grid.grid.items():
+            raw_cells[f"{x},{y}"] = {
+                "coordinates": (x, y),
+                "occupied_by": cell.occupied_by,
+                "structure": cell.structure,
+                "cell_object": str(cell)
+            }
+        
+        return {
+            "width": sim.grid.width,
+            "height": sim.grid.height,
+            "agent_positions": sim.grid.agent_positions,
+            "raw_cells": raw_cells,
+            "serialized_cells": sim.grid.serialize(),
+            "bounds_check": {
+                "max_x": sim.grid.width - 1,
+                "max_y": sim.grid.height - 1,
+                "example_valid_coords": [(0, 0), (sim.grid.width-1, sim.grid.height-1)]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Grid raw endpoint error: {e}")
+        return {"error": f"Grid raw failed: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn

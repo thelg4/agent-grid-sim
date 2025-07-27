@@ -15,12 +15,18 @@ class BuilderAgent(BaseAgent):
         self.buildings_completed = 0
         self.last_built_location = None
         self.processed_messages = set()  # Track processed messages
+        self.current_target = None  # Track current movement target
+        self.movement_path = []  # Path to target
 
     def step(self, messages: list[Message]) -> Optional[Message]:
         """
         Process strategic build orders and execute construction.
         """
         logger.info(f"Builder step starting - total messages: {len(messages)}")
+        
+        # If we're already moving toward a target, continue that first
+        if self.current_target and self.movement_path:
+            return self._continue_movement()
         
         # Find the MOST RECENT strategic build order from this step
         latest_strategic_order = None
@@ -50,12 +56,25 @@ class BuilderAgent(BaseAgent):
                 x, y = coords
                 logger.info(f"Builder processing NEW coordinates: ({x}, {y})")
                 
-                # Execute immediately
-                if self._attempt_build(x, y):
-                    self.last_built_location = (x, y)
-                    return self.send_message(f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({x}, {y})")
-                else:
-                    return self.send_message(f"CONSTRUCTION_FAILED: Cannot build at ({x}, {y}) - location unavailable")
+                # Check if we can build immediately (already at location or adjacent)
+                current_pos = self.grid.get_agent_position(self.agent_id)
+                if current_pos:
+                    current_x, current_y = current_pos
+                    distance = abs(x - current_x) + abs(y - current_y)
+                    
+                    if distance <= 1:  # At location or adjacent
+                        logger.info(f"Builder close enough to build at ({x}, {y})")
+                        if self._attempt_build(x, y):
+                            self.last_built_location = (x, y)
+                            return self.send_message(f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({x}, {y})")
+                        else:
+                            return self.send_message(f"CONSTRUCTION_FAILED: Cannot build at ({x}, {y}) - location unavailable")
+                    else:
+                        # Start movement toward target
+                        logger.info(f"Builder needs to move to ({x}, {y}), distance: {distance}")
+                        self.current_target = (x, y)
+                        self.movement_path = self._calculate_path(current_pos, (x, y))
+                        return self._continue_movement()
             else:
                 logger.warning(f"Failed to extract coordinates from: {latest_strategic_order.content}")
         else:
@@ -63,6 +82,81 @@ class BuilderAgent(BaseAgent):
 
         # If no strategic orders processed, try opportunistic building
         return self._opportunistic_build()
+
+    def _continue_movement(self) -> Optional[Message]:
+        """Continue moving toward the current target."""
+        if not self.current_target or not self.movement_path:
+            return None
+            
+        current_pos = self.grid.get_agent_position(self.agent_id)
+        if not current_pos:
+            logger.error("Builder has no current position!")
+            return None
+        
+        # Get next step in path
+        next_pos = self.movement_path[0]
+        
+        # Try to move to next position
+        if self.grid.is_within_bounds(next_pos[0], next_pos[1]) and self.grid.is_empty(next_pos[0], next_pos[1]):
+            success = self.grid.move_agent(self.agent_id, next_pos)
+            if success:
+                self.movement_path.pop(0)  # Remove completed step
+                self.status = f"Moving toward ({self.current_target[0]}, {self.current_target[1]}) - {len(self.movement_path)} steps remaining"
+                self._add_to_memory(f"Moved to {next_pos} toward build site")
+                
+                # Check if we've reached the target or are adjacent
+                target_x, target_y = self.current_target
+                current_x, current_y = next_pos
+                distance = abs(target_x - current_x) + abs(target_y - current_y)
+                
+                if distance <= 1:  # At target or adjacent
+                    logger.info(f"Builder reached build location ({target_x}, {target_y})")
+                    if self._attempt_build(target_x, target_y):
+                        self.last_built_location = (target_x, target_y)
+                        self.current_target = None
+                        self.movement_path = []
+                        return self.send_message(f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({target_x}, {target_y})")
+                    else:
+                        self.current_target = None
+                        self.movement_path = []
+                        return self.send_message(f"CONSTRUCTION_FAILED: Cannot build at ({target_x}, {target_y}) - location unavailable")
+                
+                return self.send_message(f"MOVEMENT_PROGRESS: Moving toward ({target_x}, {target_y}) - {len(self.movement_path)} steps remaining")
+            else:
+                logger.warning(f"Builder movement blocked at {next_pos}")
+                # Clear movement plan if blocked
+                self.current_target = None
+                self.movement_path = []
+                return self.send_message(f"MOVEMENT_FAILED: Path blocked, abandoning build target")
+        else:
+            logger.warning(f"Next step {next_pos} is blocked or invalid")
+            self.current_target = None
+            self.movement_path = []
+            return self.send_message(f"MOVEMENT_FAILED: Cannot reach build location")
+
+    def _calculate_path(self, start: tuple[int, int], target: tuple[int, int]) -> list[tuple[int, int]]:
+        """Calculate a simple path from start to target."""
+        path = []
+        current_x, current_y = start
+        target_x, target_y = target
+        
+        # Simple pathfinding: move horizontally first, then vertically
+        while current_x != target_x:
+            if current_x < target_x:
+                current_x += 1
+            else:
+                current_x -= 1
+            path.append((current_x, current_y))
+        
+        while current_y != target_y:
+            if current_y < target_y:
+                current_y += 1
+            else:
+                current_y -= 1
+            path.append((current_x, current_y))
+        
+        logger.info(f"Calculated path from {start} to {target}: {path}")
+        return path
 
     def _extract_coordinates_from_message(self, message: str) -> Optional[tuple[int, int]]:
         """Extract coordinates from a strategist message."""
@@ -98,10 +192,16 @@ class BuilderAgent(BaseAgent):
             self.status = f"Build failed: ({x}, {y}) out of bounds"
             return False
             
-        # Check if location is empty
-        if not self.grid.is_empty(x, y):
-            cell = self.grid.grid.get((x, y))
-            logger.warning(f"Build failed: ({x}, {y}) occupied by {cell.occupied_by if cell else 'unknown'}, structure: {cell.structure if cell else 'unknown'}")
+        # Check if location is empty (no other agents, but builder can build where it stands)
+        cell = self.grid.grid.get((x, y))
+        if cell and cell.structure:
+            logger.warning(f"Build failed: ({x}, {y}) already has structure: {cell.structure}")
+            self.status = f"Build failed: ({x}, {y}) has structure"
+            return False
+        
+        # Check if there's another agent at this location (not the builder)
+        if cell and cell.occupied_by and cell.occupied_by != self.agent_id:
+            logger.warning(f"Build failed: ({x}, {y}) occupied by {cell.occupied_by}")
             self.status = f"Build failed: ({x}, {y}) occupied"
             return False
         
@@ -122,6 +222,7 @@ class BuilderAgent(BaseAgent):
                 else:
                     logger.error(f"Verification FAILED: Cell at ({x}, {y}) still empty after build!")
                 
+                self._add_to_memory(f"Built structure #{self.buildings_completed} at ({x}, {y})")
                 return True
             else:
                 logger.warning(f"Build failed: grid.place returned False for ({x}, {y})")
@@ -140,14 +241,25 @@ class BuilderAgent(BaseAgent):
             x, y = builder_pos
             logger.info(f"Builder opportunistic build from position ({x}, {y})")
             
+            # Check current position first (can build where standing)
+            if self.grid.is_within_bounds(x, y):
+                cell = self.grid.grid.get((x, y))
+                if not cell or not cell.structure:  # No structure here yet
+                    logger.info(f"Opportunistic build attempt at current position ({x}, {y})")
+                    if self._attempt_build(x, y):
+                        self.last_built_location = (x, y)
+                        return self.send_message(f"OPPORTUNISTIC_BUILD: Constructed building at ({x}, {y})")
+            
             # Check adjacent spaces for building opportunities
             for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
                 nx, ny = x + dx, y + dy
                 if self.grid.is_within_bounds(nx, ny) and self.grid.is_empty(nx, ny):
-                    logger.info(f"Opportunistic build attempt at ({nx}, {ny})")
-                    if self._attempt_build(nx, ny):
-                        self.last_built_location = (nx, ny)
-                        return self.send_message(f"OPPORTUNISTIC_BUILD: Constructed building at ({nx}, {ny})")
+                    cell = self.grid.grid.get((nx, ny))
+                    if not cell or not cell.structure:
+                        logger.info(f"Opportunistic build attempt at ({nx}, {ny})")
+                        if self._attempt_build(nx, ny):
+                            self.last_built_location = (nx, ny)
+                            return self.send_message(f"OPPORTUNISTIC_BUILD: Constructed building at ({nx}, {ny})")
         
         # Nothing to do
         self.status = "No construction opportunities"
@@ -160,6 +272,8 @@ class BuilderAgent(BaseAgent):
         base_status.update({
             "buildings_completed": self.buildings_completed,
             "last_built_location": self.last_built_location,
-            "processed_messages_count": len(self.processed_messages)
+            "processed_messages_count": len(self.processed_messages),
+            "current_target": self.current_target,
+            "movement_steps_remaining": len(self.movement_path)
         })
         return base_status

@@ -39,10 +39,10 @@ class SimulationGoals:
             ]
 
 class Simulation:
-    def __init__(self, width: int = 6, height: int = 5):
+    def __init__(self, width: int = 12, height: int = 5):  # Default to match your grid
         self.grid = Grid(width, height)
         
-        # Track exploration properly
+        # Track exploration properly - this will sync with scout's visited_cells
         self.visited_cells: Set[tuple[int, int]] = set()
         
         self.agents = {
@@ -61,6 +61,9 @@ class Simulation:
         self.visited_cells.add((0, 0))
         self.visited_cells.add((1, 0))
         self.visited_cells.add((2, 0))
+        
+        # Also mark them in the scout's visited cells
+        self.agents["scout"].visited_cells.update(self.visited_cells)
         
         if not all(success):
             logger.warning("Some agents could not be placed in initial positions")
@@ -100,7 +103,7 @@ class Simulation:
             logger.info(f"Starting mission step {step_num}")
             
             # Update visited cells before processing
-            self._update_visited_cells()
+            self._sync_exploration_data()
             
             # Check mission status
             if step_num > SimulationGoals.MAX_STEPS:
@@ -123,16 +126,12 @@ class Simulation:
             # Run the agent flow (each agent acts once)
             result_state = self.flow.invoke(flow_state)
 
-            # DEBUG: Check grid state after each step
-            structure_count = self.grid.debug_grid_state()
-            logger.info(f"Step {step_num}: Grid has {structure_count} structures")
-            
             # Update our state with the results
             self.state["messages"] = result_state["messages"]
             self.state["grid"] = result_state["grid"]
             
-            # Update visited cells after agent movements
-            self._update_visited_cells()
+            # Sync exploration data after agent movements
+            self._sync_exploration_data()
             
             # Process new messages and extract meaningful actions
             new_logs = []
@@ -163,6 +162,9 @@ class Simulation:
             if exploration_progress >= SimulationGoals.EXPLORATION_TARGET and buildings_built >= SimulationGoals.BUILDING_TARGET:
                 self.state["mission_status"] = "SUCCESS"
                 new_logs.append("🎉 MISSION ACCOMPLISHED: All objectives completed!")
+            elif buildings_built >= SimulationGoals.BUILDING_TARGET:
+                self.state["mission_status"] = "BUILDING_TARGET_REACHED"
+                new_logs.append(f"🏗️ BUILDING TARGET REACHED: {buildings_built}/{SimulationGoals.BUILDING_TARGET} buildings completed!")
             
             # Add progress update every 5 steps
             if step_num % 5 == 0:
@@ -177,15 +179,16 @@ class Simulation:
             if len(self.state["logs"]) > 100:
                 self.state["logs"] = self.state["logs"][-100:]
             
+            # Force sync agent status data to ensure frontend gets updated info
+            agent_status = self._get_fresh_agent_status()
+            
             logger.info(f"Step {step_num} completed - Progress: {exploration_progress:.0%} explored, {buildings_built} buildings")
+            logger.info(f"Agent status sync: Scout {agent_status.get('scout', {}).get('cells_visited', 0)} cells, Builder {agent_status.get('builder', {}).get('buildings_completed', 0)} buildings")
             
             return {
                 "logs": self.state["logs"],
                 "grid": self.grid.serialize(),
-                "agents": {
-                    agent_id: agent.get_status()
-                    for agent_id, agent in self.agents.items()
-                },
+                "agents": agent_status,  # Use fresh status
                 "step_count": step_num,
                 "mission_status": self.state["mission_status"],
                 "exploration_progress": exploration_progress,
@@ -205,36 +208,91 @@ class Simulation:
             return {
                 "logs": self.state["logs"],
                 "grid": self.grid.serialize(),
-                "agents": {
-                    agent_id: agent.get_status()
-                    for agent_id, agent in self.agents.items()
-                },
+                "agents": self._get_fresh_agent_status(),
                 "step_count": self.state["step_count"],
                 "mission_status": "ERROR",
                 "status": "error",
                 "error": error_msg
             }
 
-    def _update_visited_cells(self):
-        """Update the set of visited cells based on current agent positions"""
-        for agent_id, agent in self.agents.items():
-            position = self.grid.get_agent_position(agent_id)
-            if position:
-                self.visited_cells.add(position)
+    def _sync_exploration_data(self):
+        """Sync exploration data between simulation and scout agent"""
+        # Get scout's visited cells
+        scout = self.agents.get("scout")
+        if scout and hasattr(scout, 'visited_cells'):
+            # Update simulation's visited cells with scout's data
+            self.visited_cells.update(scout.visited_cells)
+            
+            # Also add current positions of all agents
+            for agent_id, agent in self.agents.items():
+                position = self.grid.get_agent_position(agent_id)
+                if position:
+                    self.visited_cells.add(position)
+                    # Update scout's visited cells too
+                    scout.visited_cells.add(position)
+        
+        logger.debug(f"Synced exploration: Scout has {len(scout.visited_cells) if scout else 0} cells, Simulation tracks {len(self.visited_cells)} cells")
+
+    def _get_fresh_agent_status(self) -> dict:
+        """Get fresh agent status with forced updates."""
+        try:
+            status = {}
+            for agent_id, agent in self.agents.items():
+                # Get the agent's current status
+                agent_status = agent.get_status()
                 
-                # Also mark adjacent cells as "observed" for scout
+                # Add current position (force refresh)
+                current_position = self.grid.get_agent_position(agent_id)
+                if current_position:
+                    agent_status["position"] = current_position
+                
+                # Add mission-specific context and ensure data is fresh
                 if agent_id == "scout":
-                    x, y = position
-                    for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-                        nx, ny = x + dx, y + dy
-                        if self.grid.is_within_bounds(nx, ny):
-                            self.visited_cells.add((nx, ny))
+                    agent_status["mission_role"] = "Explorer & Intelligence Gatherer"
+                    # Force refresh exploration data
+                    if hasattr(agent, 'visited_cells'):
+                        agent_status["cells_visited"] = len(agent.visited_cells)
+                        agent_status["exploration_percentage"] = (len(agent.visited_cells) / (self.grid.width * self.grid.height)) * 100
+                    
+                elif agent_id == "strategist":
+                    agent_status["mission_role"] = "Tactical Coordinator & Planner"
+                    # Force refresh strategist data
+                    if hasattr(agent, 'scout_reports'):
+                        agent_status["scout_reports_received"] = len(agent.scout_reports)
+                    if hasattr(agent, 'suggested_locations'):
+                        agent_status["build_orders_issued"] = len(agent.suggested_locations)
+                    if hasattr(agent, 'analysis_count'):
+                        agent_status["analysis_cycles"] = agent.analysis_count
+                
+                elif agent_id == "builder":
+                    agent_status["mission_role"] = "Construction & Infrastructure"
+                    # Force refresh builder data
+                    if hasattr(agent, 'buildings_completed'):
+                        agent_status["buildings_completed"] = agent.buildings_completed
+                    if hasattr(agent, 'last_built_location'):
+                        agent_status["last_built_location"] = agent.last_built_location
+                    if hasattr(agent, 'processed_messages'):
+                        agent_status["processed_messages_count"] = len(agent.processed_messages)
+                    if hasattr(agent, 'current_target'):
+                        agent_status["current_target"] = agent.current_target
+                    if hasattr(agent, 'movement_path'):
+                        agent_status["movement_steps_remaining"] = len(agent.movement_path)
+                
+                status[agent_id] = agent_status
+                logger.debug(f"Agent {agent_id} status refreshed: {agent_status.get('cells_visited', 'N/A')} cells, {agent_status.get('buildings_completed', 'N/A')} buildings")
+            
+            return status
+        except Exception as e:
+            logger.error(f"Error getting fresh agent status: {e}")
+            return {}
 
     def _calculate_exploration_progress(self) -> float:
         """Calculate what percentage of the grid has been explored."""
         total_cells = self.grid.width * self.grid.height
         explored_cells = len(self.visited_cells)
-        return min(explored_cells / total_cells, 1.0)
+        progress = min(explored_cells / total_cells, 1.0)
+        logger.debug(f"Exploration progress: {explored_cells}/{total_cells} = {progress:.2%}")
+        return progress
 
     def _count_buildings(self) -> int:
         """Count the number of buildings constructed."""
@@ -242,6 +300,7 @@ class Simulation:
         for cell in self.grid.grid.values():
             if cell.structure and cell.structure != "scanned":
                 building_count += 1
+        logger.debug(f"Buildings count: {building_count}")
         return building_count
 
     def get_grid_state(self) -> dict:
@@ -259,19 +318,4 @@ class Simulation:
 
     def get_agent_status(self) -> dict:
         """Get status of all agents with mission context."""
-        try:
-            status = {}
-            for agent_id, agent in self.agents.items():
-                agent_status = agent.get_status()
-                # Add mission-specific context
-                if agent_id == "scout":
-                    agent_status["mission_role"] = "Explorer & Intelligence Gatherer"
-                elif agent_id == "strategist":
-                    agent_status["mission_role"] = "Tactical Coordinator & Planner"
-                elif agent_id == "builder":
-                    agent_status["mission_role"] = "Construction & Infrastructure"
-                status[agent_id] = agent_status
-            return status
-        except Exception as e:
-            logger.error(f"Error getting agent status: {e}")
-            return {}
+        return self._get_fresh_agent_status()

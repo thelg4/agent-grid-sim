@@ -37,8 +37,11 @@ class Grid:
         if agent_id not in self.agent_positions:
             logger.warning(f"Cannot move agent {agent_id}: not found in agent_positions")
             return False
-        if new_position not in self.grid or self.grid[new_position].occupied_by:
-            logger.warning(f"Cannot move agent {agent_id} to {new_position}: position occupied or invalid")
+        if new_position not in self.grid:
+            logger.warning(f"Cannot move agent {agent_id} to {new_position}: position invalid")
+            return False
+        if self.grid[new_position].occupied_by and self.grid[new_position].occupied_by != agent_id:
+            logger.warning(f"Cannot move agent {agent_id} to {new_position}: position occupied by {self.grid[new_position].occupied_by}")
             return False
 
         old_position = self.agent_positions[agent_id]
@@ -59,7 +62,7 @@ class Grid:
         return False
 
     def place(self, x: int, y: int, structure) -> bool:
-        """Place a structure at the given coordinates"""
+        """Place a structure at the given coordinates - agents can build where they stand"""
         position = (x, y)
         logger.info(f"Grid.place called: position=({x}, {y}), structure={structure}")
         
@@ -71,15 +74,13 @@ class Grid:
         cell = self.grid[position]
         logger.info(f"Cell at {position}: occupied_by={cell.occupied_by}, structure={cell.structure}")
         
-        # Check if position is available (not occupied by agent)
-        if cell.occupied_by is not None:
-            logger.warning(f"Cannot place structure at {position}: occupied by agent {cell.occupied_by}")
-            return False
-            
         # Check if there's already a structure
         if cell.structure is not None:
             logger.warning(f"Cannot place structure at {position}: already has structure {cell.structure}")
             return False
+        
+        # IMPORTANT: Allow building where an agent stands (builders can build on their location)
+        # This is realistic - a builder can construct a building where they are standing
         
         # Place the structure
         cell.structure = "building"
@@ -87,7 +88,7 @@ class Grid:
         
         # Verify the placement
         verification_cell = self.grid[position]
-        logger.info(f"Verification: Cell at {position} now has structure={verification_cell.structure}")
+        logger.info(f"Verification: Cell at {position} now has structure={verification_cell.structure}, occupied_by={verification_cell.occupied_by}")
         
         return True
 
@@ -106,16 +107,29 @@ class Grid:
     
     def is_within_bounds(self, x: int, y: int) -> bool:
         result = 0 <= x < self.width and 0 <= y < self.height
+        # FIXED: Changed self.grid.height to self.height
         logger.debug(f"is_within_bounds({x}, {y}) = {result} (grid: {self.width}x{self.height})")
         return result
 
     def is_empty(self, x: int, y: int) -> bool:
+        """Check if a position is empty (no other agents, structures are checked separately)"""
         if (x, y) not in self.grid:
             return False
         cell = self.grid[(x, y)]
-        is_empty = cell.occupied_by is None and cell.structure is None
+        # For movement purposes, only check if occupied by another agent
+        # Structures don't prevent movement, they're just there
+        is_empty = cell.occupied_by is None
         logger.debug(f"is_empty({x}, {y}) = {is_empty} (occupied_by={cell.occupied_by}, structure={cell.structure})")
         return is_empty
+    
+    def is_completely_empty(self, x: int, y: int) -> bool:
+        """Check if a position has no agents AND no structures"""
+        if (x, y) not in self.grid:
+            return False
+        cell = self.grid[(x, y)]
+        is_completely_empty = cell.occupied_by is None and cell.structure is None
+        logger.debug(f"is_completely_empty({x}, {y}) = {is_completely_empty} (occupied_by={cell.occupied_by}, structure={cell.structure})")
+        return is_completely_empty
         
     def debug_grid_state(self):
         """Debug method to print grid state"""
@@ -124,12 +138,17 @@ class Grid:
         logger.info(f"Agent positions: {self.agent_positions}")
         
         structure_count = 0
+        agent_count = 0
         for (x, y), cell in self.grid.items():
             if cell.structure:
                 structure_count += 1
-                logger.info(f"Structure at ({x}, {y}): {cell.structure}")
+                logger.info(f"Structure at ({x}, {y}): {cell.structure} (occupied_by: {cell.occupied_by})")
+            if cell.occupied_by:
+                agent_count += 1
+                logger.info(f"Agent at ({x}, {y}): {cell.occupied_by} (structure: {cell.structure})")
         
         logger.info(f"Total structures: {structure_count}")
+        logger.info(f"Total agents: {agent_count}")
         logger.info(f"=== END GRID DEBUG ===")
         
         return structure_count
