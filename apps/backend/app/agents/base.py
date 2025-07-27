@@ -20,7 +20,7 @@ class BaseAgent(ABC):
     def observe(self) -> Dict:
         """Get local view of the grid (stub for now)."""
         return {
-            "location": self.grid.find_agent(self.agent_id),
+            "location": self.grid.get_agent_position(self.agent_id),
             "surroundings": [],  # could be expanded later
         }
 

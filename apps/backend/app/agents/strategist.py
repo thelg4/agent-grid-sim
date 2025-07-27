@@ -1,3 +1,4 @@
+from typing import Optional
 from .base import BaseAgent
 from app.tools.message import Message
 from app.env.grid import Grid
@@ -7,7 +8,7 @@ class StrategistAgent(BaseAgent):
     def __init__(self, agent_id: str, grid: Grid):
         super().__init__(agent_id, "strategist", grid)
 
-    def step(self, messages: list[Message]) -> Message | None:
+    def step(self, messages: list[Message]) -> Optional[Message]:
         """
         Strategist scans grid and suggests build locations.
         """

@@ -1,3 +1,4 @@
+from typing import Union, Optional
 from .base import BaseAgent
 from app.tools.message import Message
 from app.env.grid import Grid
@@ -8,7 +9,7 @@ class BuilderAgent(BaseAgent):
         super().__init__(agent_id, "builder", grid)
         self.build_target = None
 
-    def step(self, messages: list[Message]) -> Message | None:
+    def step(self, messages: list[Message]) -> Optional[Message]:
         """
         Process incoming messages and take action if any suggest building.
         Returns a message describing the result.

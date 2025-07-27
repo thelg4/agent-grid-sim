@@ -19,6 +19,7 @@ class Grid:
             (x, y): Cell() for x in range(width) for y in range(height)
         }
         self.agent_positions: Dict[str, GridLocation] = {}  # agent_id -> (x, y)
+        self.directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # left, right, up, down
 
     def place_agent(self, agent_id: str, position: GridLocation) -> bool:
         if position not in self.grid or self.grid[position].occupied_by:
@@ -60,3 +61,10 @@ class Grid:
                 for (x, y), cell in self.grid.items()
             }
         }
+    
+    def is_within_bounds(self, x: int, y: int) -> bool:
+        return 0 <= x < self.width and 0 <= y < self.height
+
+    def is_empty(self, x: int, y: int) -> bool:
+        return (x, y) in self.grid and self.grid[(x, y)].occupied_by is None
+
