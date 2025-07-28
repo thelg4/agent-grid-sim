@@ -4,7 +4,7 @@ from app.env.grid import Grid
 from app.agents.builder import BuilderAgent
 from app.agents.scout import ScoutAgent
 from app.agents.strategist import StrategistAgent
-from app.langgraph.agent_flow import build_agent_flow
+from app.langgraph.agent_flow import build_agent_flow, AgentState
 from app.tools.message import Message
 
 logger = logging.getLogger(__name__)
@@ -17,29 +17,46 @@ class SimulationGoals:
     MAX_STEPS = 50           # Complete goals within 50 steps
     
     @staticmethod
-    def get_current_objectives(step_count: int) -> List[str]:
-        """Return current objectives based on simulation state"""
-        if step_count < 10:
+    def get_current_objectives(step_count: int, mission_phase: str) -> List[str]:
+        """Return current objectives based on simulation state and phase"""
+        if mission_phase == "initialization":
             return [
-                "🎯 Primary Goal: Scout should explore and map the grid",
-                "🎯 Secondary Goal: Strategist should analyze scout reports", 
-                "🎯 Tertiary Goal: Builder should wait for building instructions"
+                "🎯 Initialize all agents and establish communication",
+                "🎯 Begin systematic grid exploration",
+                "🎯 Set up coordination protocols"
             ]
-        elif step_count < 30:
+        elif mission_phase == "exploration":
             return [
-                "🎯 Primary Goal: Complete grid exploration",
-                "🎯 Secondary Goal: Strategist should identify optimal building locations",
-                "🎯 Tertiary Goal: Begin strategic construction"
+                "🎯 Scout should systematically explore the grid",
+                "🎯 Map terrain and identify key locations",
+                "🎯 Report findings to strategist for analysis"
+            ]
+        elif mission_phase == "analysis":
+            return [
+                "🎯 Strategist should analyze exploration data",
+                "🎯 Identify optimal building locations",
+                "🎯 Create strategic construction plan"
+            ]
+        elif mission_phase == "construction":
+            return [
+                "🎯 Builder should execute construction orders",
+                "🎯 Coordinate with strategist for optimal placement",
+                "🎯 Progress toward building target completion"
+            ]
+        elif mission_phase == "optimization":
+            return [
+                "🎯 Optimize existing structures and placement",
+                "🎯 Fine-tune agent coordination",
+                "🎯 Prepare for mission completion"
             ]
         else:
             return [
-                "🎯 Primary Goal: Complete remaining buildings",
-                "🎯 Secondary Goal: Optimize existing structures",
-                "🎯 Tertiary Goal: Prepare mission summary"
+                "🎯 Mission objectives complete",
+                "🎯 All targets achieved successfully"
             ]
 
 class Simulation:
-    def __init__(self, width: int = 12, height: int = 5):  # Default to match your grid
+    def __init__(self, width: int = 6, height: int = 5):
         self.grid = Grid(width, height)
         
         # Track exploration properly - this will sync with scout's visited_cells
@@ -68,7 +85,10 @@ class Simulation:
         if not all(success):
             logger.warning("Some agents could not be placed in initial positions")
 
+        # Initialize enhanced conditional flow
         self.flow = build_agent_flow()
+        
+        # Enhanced state with conditional logic support
         self.state = {
             "agents": self.agents,
             "messages": [],
@@ -79,56 +99,84 @@ class Simulation:
             "goals": SimulationGoals(),
             "exploration_progress": 0.0,
             "buildings_built": 0,
-            "mission_status": "ACTIVE"
+            "mission_status": "ACTIVE",
+            "mission_phase": "initialization",
+            "active_threats": 0,
+            "resource_constraints": False,
+            "coordination_needed": False,
+            "emergency_mode": False,
+            "strategic_plan_ready": False,
+            "last_activity": {"scout": "none", "strategist": "none", "builder": "none"},
+            "phase_transitions": [],
+            "coordination_events": []
         }
         
         # Add initial mission briefing
         initial_briefing = [
-            "🚀 MISSION BRIEFING: Multi-Agent Grid Development",
+            "🚀 MISSION BRIEFING: Enhanced Multi-Agent Grid Development",
             "📋 Scout: Systematically explore and report findings",
             "📋 Strategist: Analyze reports and plan optimal building locations", 
             "📋 Builder: Construct buildings at strategically chosen locations",
-            f"🎯 TARGET: Explore {SimulationGoals.EXPLORATION_TARGET*100}% of grid and build {SimulationGoals.BUILDING_TARGET} structures"
+            f"🎯 TARGET: Explore {SimulationGoals.EXPLORATION_TARGET*100}% of grid and build {SimulationGoals.BUILDING_TARGET} structures",
+            "🔄 ENHANCED: Conditional flows and adaptive coordination enabled"
         ]
         self.state["logs"].extend(initial_briefing)
         
-        logger.info(f"Mission-oriented simulation initialized with {len(self.agents)} agents on {width}x{height} grid")
+        logger.info(f"Enhanced conditional simulation initialized with {len(self.agents)} agents on {width}x{height} grid")
 
     def step(self) -> dict:
-        """Execute one simulation step with goal tracking."""
+        """Execute one simulation step with enhanced conditional logic."""
         try:
             self.state["step_count"] += 1
             step_num = self.state["step_count"]
             
-            logger.info(f"Starting mission step {step_num}")
+            logger.info(f"Starting enhanced mission step {step_num} - Phase: {self.state['mission_phase']}")
             
             # Update visited cells before processing
             self._sync_exploration_data()
+            
+            # Check for phase transitions and emergencies
+            self._check_emergency_conditions()
+            self._detect_phase_transitions()
             
             # Check mission status
             if step_num > SimulationGoals.MAX_STEPS:
                 self.state["mission_status"] = "TIMEOUT"
                 self.state["logs"].append(f"🚨 MISSION TIMEOUT: Exceeded {SimulationGoals.MAX_STEPS} steps")
             
-            # Add current objectives to context
-            current_objectives = SimulationGoals.get_current_objectives(step_num)
-            
-            # Prepare enhanced state for the flow
-            flow_state = {
+            # Prepare enhanced state for the conditional flow
+            flow_state: AgentState = {
                 "grid": self.grid,
                 "messages": self.state["messages"],
                 "step_count": step_num,
-                "objectives": current_objectives,
+                "mission_phase": self.state["mission_phase"],
+                "objectives": SimulationGoals.get_current_objectives(step_num, self.state["mission_phase"]),
                 "exploration_progress": self._calculate_exploration_progress(),
-                "buildings_built": self._count_buildings()
+                "buildings_built": self._count_buildings(),
+                "active_threats": self.state["active_threats"],
+                "resource_constraints": self.state["resource_constraints"],
+                "coordination_needed": self.state["coordination_needed"],
+                "emergency_mode": self.state["emergency_mode"],
+                "last_activity": self.state["last_activity"].copy(),
+                "strategic_plan_ready": self.state["strategic_plan_ready"]
             }
             
-            # Run the agent flow (each agent acts once)
+            logger.info(f"Flow state prepared: Phase={flow_state['mission_phase']}, "
+                       f"Exploration={flow_state['exploration_progress']:.1%}, "
+                       f"Buildings={flow_state['buildings_built']}, "
+                       f"Emergency={flow_state['emergency_mode']}")
+            
+            # Run the enhanced conditional flow
             result_state = self.flow.invoke(flow_state)
 
             # Update our state with the results
             self.state["messages"] = result_state["messages"]
             self.state["grid"] = result_state["grid"]
+            self.state["mission_phase"] = result_state["mission_phase"]
+            self.state["coordination_needed"] = result_state["coordination_needed"]
+            self.state["emergency_mode"] = result_state["emergency_mode"]
+            self.state["last_activity"] = result_state["last_activity"]
+            self.state["strategic_plan_ready"] = result_state.get("strategic_plan_ready", False)
             
             # Sync exploration data after agent movements
             self._sync_exploration_data()
@@ -151,25 +199,41 @@ class Simulation:
             # Store previous messages for next step comparison
             self.state["previous_messages"] = result_state["messages"].copy()
             
-            # Add step summary with progress tracking
+            # Add enhanced step summary with phase and conditional info
             exploration_progress = self._calculate_exploration_progress()
             buildings_built = self._count_buildings()
             
-            step_summary = f"📊 Step {step_num} Summary: {exploration_progress:.0%} explored, {buildings_built} buildings built"
+            step_summary = (f"📊 Step {step_num} Summary: Phase={self.state['mission_phase']}, "
+                          f"{exploration_progress:.0%} explored, {buildings_built} buildings built")
             new_logs.append(step_summary)
+            
+            # Log phase transitions
+            if self.state["mission_phase"] != flow_state.get("original_phase", self.state["mission_phase"]):
+                transition_log = f"🔄 PHASE TRANSITION: {flow_state.get('original_phase', 'unknown')} → {self.state['mission_phase']}"
+                new_logs.append(transition_log)
+                self.state["phase_transitions"].append({
+                    "step": step_num,
+                    "from": flow_state.get("original_phase"),
+                    "to": self.state["mission_phase"]
+                })
+            
+            # Log coordination events
+            if result_state["coordination_needed"] != flow_state["coordination_needed"]:
+                coord_log = f"🤝 COORDINATION: {'Activated' if result_state['coordination_needed'] else 'Completed'}"
+                new_logs.append(coord_log)
+                self.state["coordination_events"].append({
+                    "step": step_num,
+                    "type": "activated" if result_state["coordination_needed"] else "completed"
+                })
             
             # Check for goal completion
             if exploration_progress >= SimulationGoals.EXPLORATION_TARGET and buildings_built >= SimulationGoals.BUILDING_TARGET:
                 self.state["mission_status"] = "SUCCESS"
+                self.state["mission_phase"] = "completion"
                 new_logs.append("🎉 MISSION ACCOMPLISHED: All objectives completed!")
             elif buildings_built >= SimulationGoals.BUILDING_TARGET:
                 self.state["mission_status"] = "BUILDING_TARGET_REACHED"
                 new_logs.append(f"🏗️ BUILDING TARGET REACHED: {buildings_built}/{SimulationGoals.BUILDING_TARGET} buildings completed!")
-            
-            # Add progress update every 5 steps
-            if step_num % 5 == 0:
-                progress_update = f"🔄 Progress Update: {current_objectives[0]}"
-                new_logs.append(progress_update)
             
             self.state["logs"].extend(new_logs)
             self.state["exploration_progress"] = exploration_progress
@@ -182,24 +246,29 @@ class Simulation:
             # Force sync agent status data to ensure frontend gets updated info
             agent_status = self._get_fresh_agent_status()
             
-            logger.info(f"Step {step_num} completed - Progress: {exploration_progress:.0%} explored, {buildings_built} buildings")
-            logger.info(f"Agent status sync: Scout {agent_status.get('scout', {}).get('cells_visited', 0)} cells, Builder {agent_status.get('builder', {}).get('buildings_completed', 0)} buildings")
+            logger.info(f"Enhanced step {step_num} completed - Phase: {self.state['mission_phase']}, "
+                       f"Progress: {exploration_progress:.0%} explored, {buildings_built} buildings")
             
             return {
                 "logs": self.state["logs"],
                 "grid": self.grid.serialize(),
-                "agents": agent_status,  # Use fresh status
+                "agents": agent_status,
                 "step_count": step_num,
                 "mission_status": self.state["mission_status"],
+                "mission_phase": self.state["mission_phase"],
                 "exploration_progress": exploration_progress,
                 "buildings_built": buildings_built,
-                "current_objectives": current_objectives,
+                "current_objectives": SimulationGoals.get_current_objectives(step_num, self.state["mission_phase"]),
                 "visited_cells": len(self.visited_cells),
+                "coordination_needed": self.state["coordination_needed"],
+                "emergency_mode": self.state["emergency_mode"],
+                "phase_transitions": self.state["phase_transitions"],
+                "coordination_events": self.state["coordination_events"],
                 "status": "success"
             }
             
         except Exception as e:
-            error_msg = f"Error in mission step {self.state['step_count']}: {str(e)}"
+            error_msg = f"Error in enhanced mission step {self.state['step_count']}: {str(e)}"
             logger.error(error_msg, exc_info=True)
             
             self.state["errors"].append(error_msg)
@@ -211,9 +280,37 @@ class Simulation:
                 "agents": self._get_fresh_agent_status(),
                 "step_count": self.state["step_count"],
                 "mission_status": "ERROR",
+                "mission_phase": self.state["mission_phase"],
                 "status": "error",
                 "error": error_msg
             }
+
+    def _check_emergency_conditions(self):
+        """Check for conditions that trigger emergency mode"""
+        # Example emergency conditions
+        if self.state["step_count"] > 30 and self.state["buildings_built"] == 0:
+            self.state["emergency_mode"] = True
+            self.state["logs"].append("🚨 EMERGENCY: No buildings constructed after 30 steps")
+        
+        # Reset emergency mode if conditions improve
+        if self.state["emergency_mode"] and self.state["buildings_built"] > 0:
+            self.state["emergency_mode"] = False
+            self.state["logs"].append("✅ EMERGENCY RESOLVED: Construction progress detected")
+
+    def _detect_phase_transitions(self):
+        """Detect when mission phase should transition"""
+        current_phase = self.state["mission_phase"]
+        exploration = self.state["exploration_progress"]
+        buildings = self.state["buildings_built"]
+        
+        if current_phase == "initialization" and self.state["step_count"] >= 2:
+            self.state["mission_phase"] = "exploration"
+        elif current_phase == "exploration" and exploration >= 0.6:
+            self.state["mission_phase"] = "analysis"
+        elif current_phase == "analysis" and self.state["strategic_plan_ready"]:
+            self.state["mission_phase"] = "construction"
+        elif current_phase == "construction" and buildings >= SimulationGoals.BUILDING_TARGET:
+            self.state["mission_phase"] = "optimization"
 
     def _sync_exploration_data(self):
         """Sync exploration data between simulation and scout agent"""
@@ -231,10 +328,11 @@ class Simulation:
                     # Update scout's visited cells too
                     scout.visited_cells.add(position)
         
-        logger.debug(f"Synced exploration: Scout has {len(scout.visited_cells) if scout else 0} cells, Simulation tracks {len(self.visited_cells)} cells")
+        logger.debug(f"Synced exploration: Scout has {len(scout.visited_cells) if scout else 0} cells, "
+                    f"Simulation tracks {len(self.visited_cells)} cells")
 
     def _get_fresh_agent_status(self) -> dict:
-        """Get fresh agent status with forced updates."""
+        """Get fresh agent status with enhanced conditional information."""
         try:
             status = {}
             for agent_id, agent in self.agents.items():
@@ -246,13 +344,18 @@ class Simulation:
                 if current_position:
                     agent_status["position"] = current_position
                 
-                # Add mission-specific context and ensure data is fresh
+                # Add enhanced mission context and conditional state info
+                agent_status["mission_phase"] = self.state["mission_phase"]
+                agent_status["last_activity"] = self.state["last_activity"].get(agent_id, "none")
+                agent_status["coordination_status"] = "needed" if self.state["coordination_needed"] else "active"
+                
                 if agent_id == "scout":
                     agent_status["mission_role"] = "Explorer & Intelligence Gatherer"
                     # Force refresh exploration data
                     if hasattr(agent, 'visited_cells'):
                         agent_status["cells_visited"] = len(agent.visited_cells)
                         agent_status["exploration_percentage"] = (len(agent.visited_cells) / (self.grid.width * self.grid.height)) * 100
+                        agent_status["exploration_target"] = SimulationGoals.EXPLORATION_TARGET * 100
                     
                 elif agent_id == "strategist":
                     agent_status["mission_role"] = "Tactical Coordinator & Planner"
@@ -263,6 +366,10 @@ class Simulation:
                         agent_status["build_orders_issued"] = len(agent.suggested_locations)
                     if hasattr(agent, 'analysis_count'):
                         agent_status["analysis_cycles"] = agent.analysis_count
+                    agent_status["strategic_plan_ready"] = self.state["strategic_plan_ready"]
+                    if hasattr(agent, 'BUILD_TARGET'):
+                        agent_status["building_target"] = agent.BUILD_TARGET
+                        agent_status["buildings_completed"] = self._count_buildings()
                 
                 elif agent_id == "builder":
                     agent_status["mission_role"] = "Construction & Infrastructure"
@@ -277,9 +384,11 @@ class Simulation:
                         agent_status["current_target"] = agent.current_target
                     if hasattr(agent, 'movement_path'):
                         agent_status["movement_steps_remaining"] = len(agent.movement_path)
+                    agent_status["construction_target"] = SimulationGoals.BUILDING_TARGET
                 
                 status[agent_id] = agent_status
-                logger.debug(f"Agent {agent_id} status refreshed: {agent_status.get('cells_visited', 'N/A')} cells, {agent_status.get('buildings_completed', 'N/A')} buildings")
+                logger.debug(f"Enhanced agent {agent_id} status: phase={self.state['mission_phase']}, "
+                           f"activity={self.state['last_activity'].get(agent_id, 'none')}")
             
             return status
         except Exception as e:
@@ -304,12 +413,16 @@ class Simulation:
         return building_count
 
     def get_grid_state(self) -> dict:
-        """Get current grid state with progress metrics."""
+        """Get current grid state with enhanced progress metrics."""
         base_state = self.grid.serialize()
         base_state["exploration_progress"] = self._calculate_exploration_progress()
         base_state["buildings_built"] = self._count_buildings()
         base_state["mission_status"] = self.state.get("mission_status", "ACTIVE")
+        base_state["mission_phase"] = self.state.get("mission_phase", "initialization")
         base_state["visited_cells"] = len(self.visited_cells)
+        base_state["coordination_needed"] = self.state.get("coordination_needed", False)
+        base_state["emergency_mode"] = self.state.get("emergency_mode", False)
+        base_state["strategic_plan_ready"] = self.state.get("strategic_plan_ready", False)
         return base_state
 
     def get_logs(self) -> list[str]:
@@ -317,5 +430,19 @@ class Simulation:
         return self.state["logs"]
 
     def get_agent_status(self) -> dict:
-        """Get status of all agents with mission context."""
+        """Get status of all agents with enhanced mission context."""
         return self._get_fresh_agent_status()
+    
+    def get_conditional_metrics(self) -> dict:
+        """Get metrics specific to conditional flow behavior."""
+        return {
+            "mission_phase": self.state["mission_phase"],
+            "phase_transitions": len(self.state["phase_transitions"]),
+            "coordination_events": len(self.state["coordination_events"]),
+            "emergency_activations": sum(1 for log in self.state["logs"] if "EMERGENCY" in log),
+            "last_activity": self.state["last_activity"],
+            "coordination_needed": self.state["coordination_needed"],
+            "strategic_plan_ready": self.state["strategic_plan_ready"],
+            "active_threats": self.state["active_threats"],
+            "resource_constraints": self.state["resource_constraints"]
+        }
