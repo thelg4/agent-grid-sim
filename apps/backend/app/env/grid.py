@@ -223,6 +223,55 @@ class Grid:
         logger.info(f"Agent {agent_id} placed at {position}")
         return True
 
+    def get_agent_position(self, agent_id: str) -> Optional[GridLocation]:
+        """Get the current position of an agent"""
+        return self.agent_positions.get(agent_id)
+
+    def find_agent(self, agent_id: str) -> Optional[GridLocation]:
+        """Find an agent's position (alias for get_agent_position for backward compatibility)"""
+        return self.get_agent_position(agent_id)
+
+    def move_agent(self, agent_id: str, new_position: GridLocation) -> bool:
+        """Move an agent to a new position"""
+        if agent_id not in self.agent_positions:
+            logger.warning(f"Cannot move agent {agent_id}: not found in agent_positions")
+            return False
+            
+        if new_position not in self.grid:
+            logger.warning(f"Cannot move agent {agent_id} to {new_position}: position invalid")
+            return False
+        
+        old_position = self.agent_positions[agent_id]
+        new_cell = self.grid[new_position]
+        old_cell = self.grid[old_position]
+        
+        # Check if target cell is occupied by another agent
+        if new_cell.occupied_by and new_cell.occupied_by != agent_id:
+            logger.warning(f"Movement blocked: {new_position} occupied by {new_cell.occupied_by}")
+            return False
+        
+        # Check if target cell allows movement
+        if not new_cell.terrain.can_move_through():
+            logger.warning(f"Movement blocked: {new_position} terrain impassable")
+            return False
+        
+        # Execute movement
+        old_cell.occupied_by = None
+        new_cell.occupied_by = agent_id
+        new_cell.visit(agent_id)
+        self.agent_positions[agent_id] = new_position
+        
+        # Record movement in history
+        self.movement_history.append({
+            "agent_id": agent_id,
+            "from": old_position,
+            "to": new_position,
+            "timestamp": time.time()
+        })
+        
+        logger.debug(f"Agent {agent_id} moved from {old_position} to {new_position}")
+        return True
+
     def request_movement(self, agent_id: str, new_position: GridLocation, priority: float = 1.0) -> bool:
         """Request movement with collision avoidance"""
         if agent_id not in self.agent_positions:
@@ -250,17 +299,161 @@ class Grid:
             if can_move:
                 target = self.collision_system.movement_requests.get(agent_id)
                 if target:
-                    self._execute_single_movement(agent_id, target)
+                    self.move_agent(agent_id, target)
         
         return movement_results
 
-    def _execute_single_movement(self, agent_id: str, new_position: GridLocation) -> bool:
-        """Execute a single agent movement"""
-        old_position = self.agent_positions[agent_id]
-        old_cell = self.grid[old_position]
-        new_cell = self.grid[new_position]
-        
-        # Check if target cell is occupied
-        if new_cell.occupied_by and new_cell.occupied_by != agent_id:
-            logger.warning(f"Movement blocked: {new_position} occupied by {new_cell.occupied_by}")
+    def is_within_bounds(self, x: int, y: int) -> bool:
+        """Check if coordinates are within grid bounds"""
+        return 0 <= x < self.width and 0 <= y < self.height
+
+    def is_empty(self, x: int, y: int) -> bool:
+        """Check if a cell is empty (no agent, passable terrain)"""
+        if not self.is_within_bounds(x, y):
             return False
+        
+        cell = self.grid.get((x, y))
+        if not cell:
+            return True
+        
+        return (cell.occupied_by is None and 
+                cell.terrain.can_move_through())
+
+    def place(self, x: int, y: int, structure) -> bool:
+        """Place a structure at the given coordinates"""
+        if not self.is_within_bounds(x, y):
+            logger.warning(f"Cannot place structure at ({x}, {y}): out of bounds")
+            return False
+        
+        cell = self.grid.get((x, y))
+        if not cell:
+            # Create cell if it doesn't exist
+            cell = Cell(x, y)
+            self.grid[(x, y)] = cell
+        
+        if cell.structure:
+            logger.warning(f"Cannot place structure at ({x}, {y}): already has structure")
+            return False
+        
+        if not cell.terrain.can_build_on():
+            logger.warning(f"Cannot place structure at ({x}, {y}): terrain not suitable")
+            return False
+        
+        # Set the structure (assuming it has a built_by attribute)
+        if hasattr(structure, 'built_by'):
+            cell.structure = structure
+        else:
+            cell.structure = "building"  # Generic structure type
+        
+        logger.info(f"Structure placed at ({x}, {y})")
+        return True
+
+    def harvest_resources(self, position: GridLocation, resource_type: ResourceType, 
+                         amount: int, agent_id: str) -> int:
+        """Harvest resources from a cell"""
+        if position not in self.grid:
+            return 0
+        
+        cell = self.grid[position]
+        harvested = cell.harvest_resource(resource_type, amount)
+        
+        if harvested > 0:
+            self.resource_extraction_log.append({
+                "agent_id": agent_id,
+                "position": position,
+                "resource_type": resource_type.value,
+                "amount": harvested,
+                "timestamp": time.time()
+            })
+            logger.debug(f"Agent {agent_id} harvested {harvested} {resource_type.value} at {position}")
+        
+        return harvested
+
+    def find_path_with_terrain(self, start: GridLocation, goal: GridLocation) -> List[GridLocation]:
+        """Find path considering terrain costs (A* pathfinding)"""
+        if start == goal:
+            return [start]
+        
+        from heapq import heappush, heappop
+        
+        open_set = [(0, start)]
+        came_from = {}
+        g_score = {start: 0}
+        f_score = {start: self._heuristic(start, goal)}
+        
+        while open_set:
+            current = heappop(open_set)[1]
+            
+            if current == goal:
+                return self._reconstruct_path(came_from, current)
+            
+            for dx, dy in self.directions:
+                neighbor = (current[0] + dx, current[1] + dy)
+                
+                if not self.is_within_bounds(neighbor[0], neighbor[1]):
+                    continue
+                
+                cell = self.grid.get(neighbor)
+                if not cell or not cell.terrain.can_move_through():
+                    continue
+                
+                tentative_g_score = g_score[current] + cell.get_movement_cost()
+                
+                if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + self._heuristic(neighbor, goal)
+                    heappush(open_set, (f_score[neighbor], neighbor))
+        
+        return []  # No path found
+
+    def _heuristic(self, a: GridLocation, b: GridLocation) -> float:
+        """Manhattan distance heuristic for pathfinding"""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def _reconstruct_path(self, came_from: Dict, current: GridLocation) -> List[GridLocation]:
+        """Reconstruct path from A* pathfinding"""
+        path = [current]
+        while current in came_from:
+            current = came_from[current]
+            path.append(current)
+        return path[::-1]
+
+    def serialize(self) -> Dict:
+        """Serialize grid state for API responses"""
+        cells = {}
+        for (x, y), cell in self.grid.items():
+            cells[f"{x},{y}"] = {
+                "x": x,
+                "y": y,
+                "occupied_by": cell.occupied_by,
+                "structure": "building" if hasattr(cell.structure, 'built_by') else cell.structure,
+                "terrain_type": cell.terrain.terrain_type.value,
+                "movement_cost": cell.terrain.movement_cost,
+                "can_build": cell.terrain.can_build_on(),
+                "resources": {rt.value: dep.amount for rt, dep in cell.terrain.resources.items()}
+            }
+        
+        return {
+            "width": self.width,
+            "height": self.height,
+            "cells": cells,
+            "agent_positions": self.agent_positions,
+            "total_cells": len(self.grid)
+        }
+
+    def update_resources(self):
+        """Update resource regeneration for all cells"""
+        for cell in self.grid.values():
+            cell.update_resources()
+
+    def get_performance_metrics(self) -> Dict:
+        """Get grid performance metrics"""
+        return {
+            "total_movements": len(self.movement_history),
+            "resource_extractions": len(self.resource_extraction_log),
+            "active_agents": len(self.agent_positions),
+            "occupied_cells": sum(1 for cell in self.grid.values() if cell.occupied_by),
+            "structures": sum(1 for cell in self.grid.values() if cell.structure),
+            "recent_movements": self.movement_history[-10:] if self.movement_history else []
+        }
