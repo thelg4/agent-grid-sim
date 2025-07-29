@@ -1,5 +1,3 @@
-# apps/backend/app/langgraph/agent_flow.py
-
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from app.agents.builder import BuilderAgent
@@ -55,9 +53,9 @@ def initialize_agents(grid: Grid):
     coordination_manager = CoordinationManager(shared_state)
     
     # Initialize agents with coordination capabilities
-    scout_agent = ScoutAgent("scout", grid, coordination_manager, shared_state)
-    strategist_agent = StrategistAgent("strategist", grid, coordination_manager, shared_state)
-    builder_agent = BuilderAgent("builder", grid, coordination_manager, shared_state)
+    scout_agent = ScoutAgent("scout", grid)
+    strategist_agent = StrategistAgent("strategist", grid)
+    builder_agent = BuilderAgent("builder", grid)
     
     # Set up initial resources
     shared_state.resources.update({
@@ -373,6 +371,53 @@ def error_recovery(state: AgentState) -> AgentState:
         state["error_recovery_attempts"] += 1
         return state
 
+def optimization_phase(state: AgentState) -> AgentState:
+    """Optimization phase for mission completion"""
+    logger.info("Executing optimization phase")
+    
+    try:
+        # Check if mission should be completed
+        if state["buildings_built"] >= 5:
+            state["mission_phase"] = "completion"
+            return state
+        
+        # Execute final coordination between agents
+        for agent_name, agent in [("scout", scout_agent), ("strategist", strategist_agent), ("builder", builder_agent)]:
+            if agent:
+                messages = coordination_manager.get_messages_for_agent(agent_name)
+                result = agent.step(messages)
+                if result:
+                    coordination_manager.send_message(result)
+                state["last_activity"][agent_name] = "optimization"
+        
+        return state
+        
+    except Exception as e:
+        logger.error(f"Optimization phase error: {e}")
+        state["error_recovery_attempts"] += 1
+        return state
+
+def completion_phase(state: AgentState) -> AgentState:
+    """Final completion phase"""
+    logger.info("Executing completion phase")
+    
+    try:
+        state["mission_phase"] = "completion"
+        state["last_activity"].update({agent: "completed" for agent in ["scout", "strategist", "builder"]})
+        
+        # Send completion message
+        completion_msg = Message(
+            "system", None, "Mission completed successfully",
+            MessageType.REPORT, MessagePriority.HIGH
+        )
+        coordination_manager.send_message(completion_msg)
+        
+        return state
+        
+    except Exception as e:
+        logger.error(f"Completion phase error: {e}")
+        return state
+
 def update_state_metrics(state: AgentState) -> AgentState:
     """Update performance metrics and state information"""
     try:
@@ -419,6 +464,8 @@ def build_agent_flow():
     graph.add_node("exploration_phase", exploration_phase)
     graph.add_node("analysis_phase", analysis_phase)
     graph.add_node("construction_phase", construction_phase)
+    graph.add_node("optimization_phase", optimization_phase)
+    graph.add_node("completion_phase", completion_phase)
     graph.add_node("parallel_execution", parallel_execution)
     graph.add_node("coordination_phase", coordination_phase)
     graph.add_node("emergency_response", emergency_response)
@@ -428,7 +475,18 @@ def build_agent_flow():
     # Set entry point
     graph.set_entry_point("initialization_phase")
     
-    # Add conditional routing
+    # Add conditional routing from initialization
+    graph.add_conditional_edges(
+        "initialization_phase",
+        route_next_action,
+        {
+            "exploration_phase": "exploration_phase",
+            "emergency_response": "emergency_response",
+            "error_recovery": "error_recovery"
+        }
+    )
+    
+    # Add conditional routing from exploration
     graph.add_conditional_edges(
         "exploration_phase",
         route_next_action,
@@ -442,6 +500,7 @@ def build_agent_flow():
         }
     )
     
+    # Add conditional routing from analysis
     graph.add_conditional_edges(
         "analysis_phase", 
         route_next_action,
@@ -455,11 +514,12 @@ def build_agent_flow():
         }
     )
     
+    # Add conditional routing from construction
     graph.add_conditional_edges(
         "construction_phase",
         route_next_action,
         {
-            "optimization_phase": "update_metrics",
+            "optimization_phase": "optimization_phase",
             "parallel_execution": "parallel_execution", 
             "coordination_phase": "coordination_phase",
             "emergency_response": "emergency_response",
@@ -468,6 +528,21 @@ def build_agent_flow():
         }
     )
     
+    # Add conditional routing from optimization
+    graph.add_conditional_edges(
+        "optimization_phase",
+        route_next_action,
+        {
+            "completion_phase": "completion_phase",
+            "parallel_execution": "parallel_execution",
+            "coordination_phase": "coordination_phase",
+            "emergency_response": "emergency_response",
+            "error_recovery": "error_recovery",
+            "update_metrics": "update_metrics"
+        }
+    )
+    
+    # Add conditional routing from parallel execution
     graph.add_conditional_edges(
         "parallel_execution",
         route_next_action,
@@ -482,6 +557,7 @@ def build_agent_flow():
         }
     )
     
+    # Add conditional routing from coordination
     graph.add_conditional_edges(
         "coordination_phase",
         route_next_action,
@@ -496,6 +572,7 @@ def build_agent_flow():
         }
     )
     
+    # Add conditional routing from emergency
     graph.add_conditional_edges(
         "emergency_response",
         route_next_action,
@@ -509,6 +586,7 @@ def build_agent_flow():
         }
     )
     
+    # Add conditional routing from error recovery
     graph.add_conditional_edges(
         "error_recovery",
         route_next_action,
@@ -530,6 +608,7 @@ def build_agent_flow():
             "exploration_phase": "exploration_phase",
             "analysis_phase": "analysis_phase", 
             "construction_phase": "construction_phase",
+            "optimization_phase": "optimization_phase",
             "parallel_execution": "parallel_execution",
             "coordination_phase": "coordination_phase",
             "emergency_response": "emergency_response",
@@ -537,6 +616,9 @@ def build_agent_flow():
             "END": END
         }
     )
+    
+    # Completion phase goes to END
+    graph.add_edge("completion_phase", END)
     
     # Compile with checkpointing for state recovery
     try:
@@ -566,20 +648,10 @@ def _count_buildings(grid: Grid) -> int:
     try:
         count = 0
         for cell in grid.grid.values():
-            if cell.structure and cell.structure == "building":
+            if cell.structure and hasattr(cell.structure, 'built_by'):
                 count += 1
         logger.debug(f"Buildings count: {count}")
         return count
     except Exception as e:
         logger.error(f"Error counting buildings: {e}")
         return 0
-        "initialization_phase",
-        route_next_action,
-        {
-            "exploration_phase": "exploration_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery"
-        }
-    )
-    
-    graph.add_conditional_edges(
