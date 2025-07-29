@@ -174,6 +174,7 @@ export function AgentCard({ agentId, agentData }: AgentCardProps) {
   const statusColorClass = getStatusColor(agentData?.status || "Idle", agentData?.last_activity);
   const memorySummary = getMemorySummary();
   const performanceDisplay = getPerformanceDisplay();
+  const recentActivity = getRecentActivity();
 
   return (
     <Card className="mb-4 hover:shadow-md transition-shadow">
@@ -220,4 +221,161 @@ export function AgentCard({ agentId, agentData }: AgentCardProps) {
             )}
           </div>
         )}
-        
+
+        {/* Agent-specific Information */}
+        {agentId === "scout" && agentData && (
+          <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+            <div className="font-medium text-blue-700 mb-2">Scout Metrics</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>Cells Visited: <span className="font-mono">{agentData.cells_visited || 0}</span></div>
+              <div>Exploration: <span className="font-mono">{agentData.exploration_percentage?.toFixed(1) || 0}%</span></div>
+              <div>Target: <span className="font-mono">{agentData.exploration_target || 80}%</span></div>
+              <div>Efficiency: <span className="font-mono">
+                {agentData.exploration_percentage && agentData.exploration_target 
+                  ? ((agentData.exploration_percentage / agentData.exploration_target) * 100).toFixed(0)
+                  : 0}%
+              </span></div>
+            </div>
+            {agentData.visited_cells_list && agentData.visited_cells_list.length > 0 && (
+              <div className="mt-2 text-xs text-blue-600">
+                Recent: {agentData.visited_cells_list.slice(-3).map(pos => `(${pos[0]},${pos[1]})`).join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+
+        {agentId === "builder" && agentData && (
+          <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+            <div className="font-medium text-yellow-700 mb-2">Builder Metrics</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>Buildings: <span className="font-mono">{agentData.buildings_completed || 0}</span></div>
+              <div>Target: <span className="font-mono">{agentData.construction_target || 5}</span></div>
+              <div>Messages: <span className="font-mono">{agentData.processed_messages_count || 0}</span></div>
+              <div>Progress: <span className="font-mono">
+                {agentData.buildings_completed && agentData.construction_target
+                  ? ((agentData.buildings_completed / agentData.construction_target) * 100).toFixed(0)
+                  : 0}%
+              </span></div>
+            </div>
+            {agentData.current_target && (
+              <div className="mt-2 text-xs text-yellow-600">
+                Target: ({agentData.current_target[0]}, {agentData.current_target[1]})
+                {agentData.movement_steps_remaining !== undefined && (
+                  <span className="ml-2">({agentData.movement_steps_remaining} steps)</span>
+                )}
+              </div>
+            )}
+            {agentData.last_built_location && (
+              <div className="mt-1 text-xs text-yellow-600">
+                Last Built: ({agentData.last_built_location[0]}, {agentData.last_built_location[1]})
+              </div>
+            )}
+          </div>
+        )}
+
+        {agentId === "strategist" && agentData && (
+          <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+            <div className="font-medium text-green-700 mb-2">Strategist Metrics</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>Build Orders: <span className="font-mono">{agentData.build_orders_issued || 0}</span></div>
+              <div>Reports: <span className="font-mono">{agentData.scout_reports_received || 0}</span></div>
+              <div>Analysis: <span className="font-mono">{agentData.analysis_cycles || 0}</span></div>
+              <div>Buildings: <span className="font-mono">{agentData.buildings_completed_strategist || agentData.buildings_completed || 0}</span></div>
+            </div>
+            <div className="mt-2 text-xs">
+              <span className={`px-2 py-1 rounded ${
+                agentData.strategic_plan_ready 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-gray-100 text-gray-600'
+              }`}>
+                Plan: {agentData.strategic_plan_ready ? 'Ready' : 'Planning'}
+              </span>
+              {agentData.building_target && (
+                <span className="ml-2 text-green-600">
+                  Target: {agentData.building_target}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Performance Metrics */}
+        {performanceDisplay && (
+          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+            <div className="font-medium text-slate-700 mb-2">Performance</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>Actions: <span className="font-mono">{performanceDisplay.actions}</span></div>
+              <div>Success Rate: <span className="font-mono">{performanceDisplay.success_rate}%</span></div>
+              <div>Messages: <span className="font-mono">{performanceDisplay.messages}</span></div>
+              <div>Avg Response: <span className="font-mono">{performanceDisplay.avg_response_time}</span></div>
+            </div>
+          </div>
+        )}
+
+        {/* Current Plan */}
+        {agentData?.current_plan && agentData.current_plan.length > 0 && (
+          <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+            <div className="font-medium text-indigo-700 mb-2">Current Plan</div>
+            <div className="space-y-1">
+              {agentData.current_plan.slice(0, 3).map((step, idx) => (
+                <div key={idx} className="text-xs flex justify-between">
+                  <span>{step.action}</span>
+                  <span className="text-indigo-600 font-mono">P{step.priority}</span>
+                </div>
+              ))}
+              {agentData.current_plan.length > 3 && (
+                <div className="text-xs text-indigo-500">
+                  +{agentData.current_plan.length - 3} more steps...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Enhanced Memory Display */}
+        {memorySummary ? (
+          <div>
+            <strong>Enhanced Memory:</strong>
+            <div className="mt-2 space-y-2">
+              {memorySummary.map(({ type, entries }) => (
+                <div key={type} className="bg-gray-50 p-2 rounded border">
+                  <div className="text-xs font-medium text-gray-700 mb-1 capitalize">
+                    {type.replace('_', ' ')}:
+                  </div>
+                  {entries.map((entry, idx) => (
+                    <div key={idx} className="text-xs text-gray-600 truncate">
+                      • {formatMemoryEntry(entry)}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          // Standard Memory Display
+          <div>
+            <strong>Recent Activity:</strong>
+            <div className="mt-2 space-y-1">
+              {Array.isArray(recentActivity) ? recentActivity.map((activity, idx) => (
+                <div key={idx} className="text-xs text-muted-foreground bg-gray-50 p-2 rounded border">
+                  {formatMemoryEntry(activity)}
+                </div>
+              )) : (
+                <div className="text-xs text-muted-foreground italic">
+                  {recentActivity}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Learning Summary */}
+        {agentData?.learning_summary && (
+          <div className="text-xs text-muted-foreground">
+            <strong>Learning:</strong> {agentData.learning_summary.successful_strategies_count} successes, {agentData.learning_summary.failed_strategies_count} failures
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
