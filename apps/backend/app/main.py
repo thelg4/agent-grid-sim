@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 # Load environment variables FIRST
 load_dotenv()
@@ -26,10 +27,50 @@ if not openai_key:
 else:
     logger.info(f"OpenAI API key loaded: {openai_key[:10]}...")
 
+# Global simulation instance
+sim = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle - startup and shutdown"""
+    global sim
+    
+    # Startup
+    logger.info("🚀 Starting up FastAPI application...")
+    try:
+        # Initialize simulation with error handling
+        grid_width = int(os.getenv("GRID_WIDTH", 6))
+        grid_height = int(os.getenv("GRID_HEIGHT", 5))
+        
+        logger.info(f"Initializing simulation with grid size {grid_width}x{grid_height}")
+        sim = Simulation(width=grid_width, height=grid_height)
+        logger.info("✅ Enhanced simulation initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize simulation during startup: {e}")
+        logger.error(f"Exception details: {str(e)}")
+        # Create a minimal fallback simulation to prevent complete failure
+        try:
+            sim = Simulation(width=6, height=5)
+            logger.warning("⚠️ Created fallback simulation with default parameters")
+        except Exception as fallback_error:
+            logger.critical(f"💥 Even fallback simulation failed: {fallback_error}")
+            sim = None
+    
+    yield
+    
+    # Shutdown
+    logger.info("🛑 Shutting down FastAPI application...")
+    if sim:
+        logger.info("Cleaning up simulation resources...")
+        # Add any cleanup logic here if needed
+    logger.info("✅ Shutdown complete")
+
 app = FastAPI(
     title="Enhanced LangGraph Multiagent Simulation",
     description="A demonstration of LangGraph-based multiagent systems with conditional flows",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # Fixed CORS configuration - allow all origins for development
@@ -40,18 +81,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
-
-# Initialize simulation with error handling
-sim = None
-try:
-    sim = Simulation(
-        width=int(os.getenv("GRID_WIDTH", 6)),
-        height=int(os.getenv("GRID_HEIGHT", 5))
-    )
-    logger.info("Enhanced simulation initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize simulation: {e}")
-    # Don't raise here, let the app start and handle errors gracefully
 
 # Response models
 class GridResponse(BaseModel):
@@ -84,12 +113,32 @@ class ConditionalMetricsResponse(BaseModel):
     coordination_needed: bool
     strategic_plan_ready: bool
 
+def ensure_simulation():
+    """Ensure simulation is initialized, create if needed"""
+    global sim
+    if sim is None:
+        logger.warning("⚠️ Simulation not initialized, creating new instance...")
+        try:
+            sim = Simulation(
+                width=int(os.getenv("GRID_WIDTH", 6)),
+                height=int(os.getenv("GRID_HEIGHT", 5))
+            )
+            logger.info("✅ Emergency simulation initialization successful")
+        except Exception as e:
+            logger.error(f"❌ Emergency simulation initialization failed: {e}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Simulation initialization failed: {str(e)}"
+            )
+    return sim
+
 @app.get("/")
 async def root():
     return {
         "message": "Enhanced LangGraph Multiagent Simulation API",
         "version": "2.0.0",
         "status": "running",
+        "simulation_initialized": sim is not None,
         "features": [
             "Conditional flows and routing",
             "Mission phase management", 
@@ -107,11 +156,15 @@ async def root():
 async def health_check():
     """Enhanced health check with conditional flow status."""
     try:
-        if not sim:
+        simulation_status = "initialized" if sim is not None else "not_initialized"
+        
+        if sim is None:
             return {
-                "status": "unhealthy",
+                "status": "degraded",
+                "simulation": simulation_status,
                 "error": "Simulation not initialized",
-                "openai_configured": bool(os.getenv("OPENAI_API_KEY"))
+                "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+                "can_initialize": True
             }
             
         # Enhanced health checks
@@ -121,6 +174,7 @@ async def health_check():
         
         return {
             "status": "healthy",
+            "simulation": simulation_status,
             "agents": agent_count,
             "grid_size": f"{grid_state['width']}x{grid_state['height']}",
             "mission_phase": conditional_metrics["mission_phase"],
@@ -133,6 +187,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         return {
             "status": "unhealthy",
+            "simulation": "error",
             "error": str(e),
             "openai_configured": bool(os.getenv("OPENAI_API_KEY"))
         }
@@ -141,10 +196,8 @@ async def health_check():
 async def get_grid():
     """Get current grid state with conditional flow information."""
     try:
-        if not sim:
-            raise HTTPException(status_code=500, detail="Simulation not initialized")
-        
-        grid_state = sim.get_grid_state()
+        current_sim = ensure_simulation()
+        grid_state = current_sim.get_grid_state()
         return grid_state
     except Exception as e:
         logger.error(f"Error getting grid state: {e}")
@@ -154,8 +207,8 @@ async def get_grid():
 async def get_logs():
     """Get simulation logs."""
     try:
-        if not sim:
-            return {"logs": ["Simulation not initialized"]}
+        if sim is None:
+            return {"logs": ["⚠️ Simulation not initialized. Use /api/step to initialize."]}
         return {"logs": sim.get_logs()}
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
@@ -165,7 +218,7 @@ async def get_logs():
 async def get_agents():
     """Get agent status information with conditional flow context."""
     try:
-        if not sim:
+        if sim is None:
             return {}
         return sim.get_agent_status()
     except Exception as e:
@@ -176,10 +229,8 @@ async def get_agents():
 async def step_simulation():
     """Execute one simulation step with conditional flow processing."""
     try:
-        if not sim:
-            raise HTTPException(status_code=500, detail="Simulation not initialized")
-        
-        result = sim.step()
+        current_sim = ensure_simulation()
+        result = current_sim.step()
         logger.info(f"Enhanced simulation step completed. Step: {result.get('step_count')}, "
                    f"Phase: {result.get('mission_phase')}, "
                    f"Coordination: {result.get('coordination_needed')}")
@@ -192,8 +243,18 @@ async def step_simulation():
 async def get_conditional_metrics():
     """Get metrics specific to conditional flow behavior."""
     try:
-        if not sim:
-            raise HTTPException(status_code=500, detail="Simulation not initialized")
+        if sim is None:
+            return {
+                "mission_phase": "not_initialized",
+                "phase_transitions": 0,
+                "coordination_events": 0,
+                "emergency_activations": 0,
+                "last_activity": {},
+                "coordination_needed": False,
+                "strategic_plan_ready": False,
+                "active_threats": 0,
+                "resource_constraints": False
+            }
         
         metrics = sim.get_conditional_metrics()
         return metrics
@@ -205,8 +266,25 @@ async def get_conditional_metrics():
 async def get_phase_info():
     """Get detailed information about current mission phase."""
     try:
-        if not sim:
-            raise HTTPException(status_code=500, detail="Simulation not initialized")
+        if sim is None:
+            from app.simulation import SimulationGoals
+            return {
+                "current_phase": "not_initialized",
+                "step_count": 0,
+                "current_objectives": ["Initialize simulation"],
+                "exploration_progress": 0.0,
+                "buildings_built": 0,
+                "coordination_needed": False,
+                "emergency_mode": False,
+                "strategic_plan_ready": False,
+                "phase_transitions": [],
+                "coordination_events": [],
+                "targets": {
+                    "exploration_target": SimulationGoals.EXPLORATION_TARGET,
+                    "building_target": SimulationGoals.BUILDING_TARGET,
+                    "max_steps": SimulationGoals.MAX_STEPS
+                }
+            }
         
         from app.simulation import SimulationGoals
         
@@ -240,18 +318,16 @@ async def get_phase_info():
 async def trigger_emergency():
     """Trigger emergency mode for testing conditional flows."""
     try:
-        if not sim:
-            raise HTTPException(status_code=500, detail="Simulation not initialized")
-        
-        sim.state["emergency_mode"] = True
-        sim.state["active_threats"] = 1
-        sim.state["logs"].append("🚨 MANUAL EMERGENCY TRIGGERED: Testing emergency response flows")
+        current_sim = ensure_simulation()
+        current_sim.state["emergency_mode"] = True
+        current_sim.state["active_threats"] = 1
+        current_sim.state["logs"].append("🚨 MANUAL EMERGENCY TRIGGERED: Testing emergency response flows")
         
         logger.info("Emergency mode manually triggered for testing")
         return {
             "message": "Emergency mode activated",
             "emergency_mode": True,
-            "active_threats": sim.state["active_threats"]
+            "active_threats": current_sim.state["active_threats"]
         }
     except Exception as e:
         logger.error(f"Error triggering emergency: {e}")
@@ -261,17 +337,15 @@ async def trigger_emergency():
 async def force_coordination():
     """Force coordination mode for testing conditional flows."""
     try:
-        if not sim:
-            raise HTTPException(status_code=500, detail="Simulation not initialized")
-        
-        sim.state["coordination_needed"] = True
-        sim.state["logs"].append("🤝 MANUAL COORDINATION TRIGGERED: Testing coordination flows")
+        current_sim = ensure_simulation()
+        current_sim.state["coordination_needed"] = True
+        current_sim.state["logs"].append("🤝 MANUAL COORDINATION TRIGGERED: Testing coordination flows")
         
         logger.info("Coordination mode manually triggered for testing")
         return {
             "message": "Coordination mode activated",
             "coordination_needed": True,
-            "mission_phase": sim.state.get("mission_phase", "unknown")
+            "mission_phase": current_sim.state.get("mission_phase", "unknown")
         }
     except Exception as e:
         logger.error(f"Error forcing coordination: {e}")
@@ -296,8 +370,12 @@ async def reset_simulation():
 async def debug_info():
     """Enhanced debug endpoint with conditional flow information."""
     try:
-        if not sim:
-            return {"error": "Simulation not initialized"}
+        if sim is None:
+            return {
+                "error": "Simulation not initialized",
+                "can_initialize": True,
+                "openai_configured": bool(os.getenv("OPENAI_API_KEY"))
+            }
         
         # Get detailed agent information
         agents_debug = {}
@@ -383,8 +461,14 @@ async def debug_info():
 async def get_grid_raw():
     """Get raw grid data for debugging."""
     try:
-        if not sim:
-            return {"error": "Simulation not initialized"}
+        if sim is None:
+            return {
+                "error": "Simulation not initialized",
+                "width": 0,
+                "height": 0,
+                "agent_positions": {},
+                "raw_cells": {}
+            }
         
         # Return the raw grid state with all details
         raw_cells = {}
