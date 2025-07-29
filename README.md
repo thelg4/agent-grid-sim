@@ -5,7 +5,7 @@ A practical demonstration of building multiagent systems using LangGraph, featur
 ## 🎯 What This Demonstrates
 
 - **LangGraph Integration**: Practical implementation of LangGraph for agent coordination
-- **LLM-Powered Agents**: Each agent uses GPT-3.5-turbo for intelligent decision making
+- **LLM-Powered Agents**: Each agent uses GPT-4o for intelligent decision making
 - **Real-time Visualization**: Live grid updates showing agent positions and actions
 - **Agent Communication**: Structured message passing between agents
 - **Role-based Behavior**: Specialized agents with distinct capabilities
