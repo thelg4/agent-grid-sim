@@ -1,3 +1,4 @@
+// apps/frontend/src/components/AgentCard.tsx
 import {
   Card,
   CardHeader,
@@ -14,22 +15,40 @@ interface AgentCardProps {
     memory: string[];
     position?: [number, number];
     mission_role?: string;
+    last_activity?: string;
+    coordination_status?: string;
+    mission_phase?: string;
+    
+    // Enhanced memory and performance data
+    memory_summary?: Record<string, string[]>;
+    performance_metrics?: Record<string, number>;
+    current_plan?: Array<{action: string; priority: number}>;
+    learning_summary?: {
+      successful_strategies_count: number;
+      failed_strategies_count: number;
+    };
+    
     // Scout specific fields
     cells_visited?: number;
     exploration_percentage?: number;
+    exploration_target?: number;
     visited_cells_list?: number[][];
+    
     // Builder specific fields
     buildings_completed?: number;
     last_built_location?: [number, number];
     processed_messages_count?: number;
     current_target?: [number, number];
     movement_steps_remaining?: number;
+    construction_target?: number;
+    
     // Strategist specific fields
     scout_reports_received?: number;
     build_orders_issued?: number;
     analysis_cycles?: number;
     building_target?: number;
-    buildings_completed?: number;
+    buildings_completed_strategist?: number;
+    strategic_plan_ready?: boolean;
   };
 }
 
@@ -45,9 +64,16 @@ const iconMap: Record<string, string> = {
   strategist: "🧠",
 };
 
+const roleDescriptions: Record<string, string> = {
+  scout: "Explorer & Intelligence Gatherer",
+  builder: "Construction & Infrastructure",
+  strategist: "Tactical Coordinator & Planner",
+};
+
 export function AgentCard({ agentId, agentData }: AgentCardProps) {
   const color = colorMap[agentId] ?? "bg-gray-400";
   const icon = iconMap[agentId] ?? "🤖";
+  const roleDescription = roleDescriptions[agentId] ?? agentData?.mission_role ?? agentData?.role ?? agentId;
 
   // Function to format memory entries for better display
   const formatMemoryEntry = (entry: string) => {
@@ -60,20 +86,43 @@ export function AgentCard({ agentId, agentData }: AgentCardProps) {
     return cleaned || entry; // fallback to original if cleaning resulted in empty string
   };
 
-  // Get status indicator based on agent activity
-  const getStatusColor = (status: string) => {
-    if (status.includes("Moved") || status.includes("Built") || status.includes("SUCCESS") || status.includes("COMPLETE")) {
-      return "bg-green-100 text-green-800";
-    } else if (status.includes("failed") || status.includes("Failed") || status.includes("ERROR")) {
-      return "bg-red-100 text-red-800";
-    } else if (status.includes("Moving") || status.includes("progress")) {
-      return "bg-blue-100 text-blue-800";
-    } else if (status.includes("Awaiting") || status.includes("Idle") || status.includes("standing by")) {
-      return "bg-gray-100 text-gray-800";
-    } else if (status.includes("Initializing") || status.includes("Ready")) {
-      return "bg-blue-100 text-blue-800";
+  // Get status indicator based on agent activity and status
+  const getStatusColor = (status: string, activity?: string) => {
+    // Check activity first for more specific coloring
+    if (activity) {
+      switch (activity) {
+        case 'exploration':
+          return "bg-yellow-100 text-yellow-800 border-yellow-200";
+        case 'analysis':
+          return "bg-purple-100 text-purple-800 border-purple-200";
+        case 'construction':
+          return "bg-green-100 text-green-800 border-green-200";
+        case 'coordination':
+          return "bg-blue-100 text-blue-800 border-blue-200";
+        case 'emergency':
+          return "bg-red-100 text-red-800 border-red-200";
+        case 'parallel_execution':
+          return "bg-indigo-100 text-indigo-800 border-indigo-200";
+        case 'optimization':
+          return "bg-orange-100 text-orange-800 border-orange-200";
+        case 'completed':
+          return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      }
     }
-    return "bg-blue-100 text-blue-800";
+    
+    // Fallback to status-based coloring
+    if (status?.includes("Moved") || status?.includes("Built") || status?.includes("SUCCESS") || status?.includes("COMPLETE")) {
+      return "bg-green-100 text-green-800 border-green-200";
+    } else if (status?.includes("failed") || status?.includes("Failed") || status?.includes("ERROR")) {
+      return "bg-red-100 text-red-800 border-red-200";
+    } else if (status?.includes("Moving") || status?.includes("progress")) {
+      return "bg-blue-100 text-blue-800 border-blue-200";
+    } else if (status?.includes("Awaiting") || status?.includes("Idle") || status?.includes("standing by")) {
+      return "bg-gray-100 text-gray-800 border-gray-200";
+    } else if (status?.includes("Initializing") || status?.includes("Ready")) {
+      return "bg-blue-100 text-blue-800 border-blue-200";
+    }
+    return "bg-blue-100 text-blue-800 border-blue-200";
   };
 
   // Get recent meaningful activity from memory
@@ -94,94 +143,81 @@ export function AgentCard({ agentId, agentData }: AgentCardProps) {
     return meaningfulActivities.length > 0 ? meaningfulActivities : agentData.memory.slice(-2);
   };
 
+  // Get enhanced memory summary if available
+  const getMemorySummary = () => {
+    if (agentData?.memory_summary) {
+      return Object.entries(agentData.memory_summary).map(([type, entries]) => ({
+        type,
+        entries: entries.slice(-2) // Latest 2 entries per type
+      }));
+    }
+    return null;
+  };
+
+  // Get performance metrics display
+  const getPerformanceDisplay = () => {
+    if (!agentData?.performance_metrics) return null;
+    
+    const metrics = agentData.performance_metrics;
+    return {
+      actions: metrics.actions_taken || 0,
+      success_rate: metrics.successful_actions && metrics.actions_taken 
+        ? ((metrics.successful_actions / metrics.actions_taken) * 100).toFixed(1)
+        : "0",
+      messages: metrics.messages_sent || 0,
+      avg_response_time: metrics.average_response_time 
+        ? (metrics.average_response_time * 1000).toFixed(0) + "ms"
+        : "N/A"
+    };
+  };
+
+  const statusColorClass = getStatusColor(agentData?.status || "Idle", agentData?.last_activity);
+  const memorySummary = getMemorySummary();
+  const performanceDisplay = getPerformanceDisplay();
+
   return (
-    <Card className="mb-4">
+    <Card className="mb-4 hover:shadow-md transition-shadow">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <CardTitle className="capitalize flex items-center gap-2">
           <span className="text-lg">{icon}</span>
-          {agentId} Agent
+          <div className="flex flex-col">
+            <span>{agentId} Agent</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {roleDescription}
+            </span>
+          </div>
           <span className={`w-2 h-2 rounded-full ${color}`} />
         </CardTitle>
+        
+        {/* Mission Phase Indicator */}
+        {agentData?.mission_phase && (
+          <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded border">
+            {agentData.mission_phase}
+          </span>
+        )}
       </CardHeader>
+      
       <CardContent className="text-sm space-y-3 pt-0">
         <div>
-          <strong>Role:</strong> {agentData?.mission_role || agentData?.role || agentId}
-        </div>
-        
-        <div>
           <strong>Status:</strong>
-          <span className={`ml-2 px-2 py-1 rounded text-xs ${getStatusColor(agentData?.status || "Idle")}`}>
+          <span className={`ml-2 px-2 py-1 rounded text-xs border ${statusColorClass}`}>
             {agentData?.status || "Idle"}
           </span>
+          {agentData?.last_activity && (
+            <span className="ml-2 text-xs text-muted-foreground">
+              ({agentData.last_activity})
+            </span>
+          )}
         </div>
         
         {agentData?.position && (
           <div>
             <strong>Position:</strong> ({agentData.position[0]}, {agentData.position[1]})
-          </div>
-        )}
-
-        {/* Agent-specific metrics */}
-        {agentId === "scout" && (
-          <div className="text-xs text-muted-foreground bg-blue-50 p-2 rounded">
-            <div><strong>Exploration:</strong> {agentData?.cells_visited || 0} cells visited</div>
-            {agentData?.exploration_percentage !== undefined && (
-              <div><strong>Progress:</strong> {agentData.exploration_percentage.toFixed(1)}% explored</div>
-            )}
-            {agentData?.visited_cells_list && agentData.visited_cells_list.length > 0 && (
-              <div><strong>Recent:</strong> {agentData.visited_cells_list.slice(-3).map(pos => `(${pos[0]},${pos[1]})`).join(', ')}</div>
-            )}
-          </div>
-        )}
-
-        {agentId === "builder" && (
-          <div className="text-xs text-muted-foreground bg-yellow-50 p-2 rounded">
-            <div><strong>Buildings:</strong> {agentData?.buildings_completed || 0} completed</div>
-            {agentData?.last_built_location && (
-              <div><strong>Last Built:</strong> ({agentData.last_built_location[0]}, {agentData.last_built_location[1]})</div>
-            )}
-            {agentData?.current_target && (
-              <div><strong>Target:</strong> ({agentData.current_target[0]}, {agentData.current_target[1]})</div>
-            )}
-            {agentData?.movement_steps_remaining !== undefined && agentData.movement_steps_remaining > 0 && (
-              <div><strong>Movement:</strong> {agentData.movement_steps_remaining} steps remaining</div>
-            )}
-            {agentData?.processed_messages_count !== undefined && (
-              <div><strong>Orders Processed:</strong> {agentData.processed_messages_count}</div>
-            )}
-          </div>
-        )}
-
-        {agentId === "strategist" && (
-          <div className="text-xs text-muted-foreground bg-green-50 p-2 rounded">
-            <div><strong>Intel:</strong> {agentData?.scout_reports_received || 0} scout reports</div>
-            <div><strong>Orders:</strong> {agentData?.build_orders_issued || 0} issued</div>
-            {agentData?.analysis_cycles !== undefined && (
-              <div><strong>Analysis Cycles:</strong> {agentData.analysis_cycles}</div>
-            )}
-            {agentData?.building_target && (
-              <div><strong>Target:</strong> {agentData?.buildings_completed || 0}/{agentData.building_target} buildings</div>
+            {agentData?.coordination_status && (
+              <span className="ml-2 text-xs text-blue-600">
+                {agentData.coordination_status}
+              </span>
             )}
           </div>
         )}
         
-        <div>
-          <strong>Recent Activity:</strong>
-          <div className="mt-1 space-y-1 max-h-24 overflow-y-auto">
-            {(() => {
-              const activities = getRecentActivity();
-              if (typeof activities === 'string') {
-                return <div className="text-xs bg-muted p-2 rounded text-muted-foreground italic">{activities}</div>;
-              }
-              return activities.map((mem: string, idx: number) => (
-                <div key={idx} className="text-xs bg-muted p-2 rounded text-muted-foreground">
-                  {formatMemoryEntry(mem)}
-                </div>
-              ));
-            })()}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}

@@ -44,27 +44,27 @@ async def lifespan(app: FastAPI):
         
         logger.info(f"Initializing simulation with grid size {grid_width}x{grid_height}")
         sim = Simulation(width=grid_width, height=grid_height)
-        logger.info("✅ Enhanced simulation initialized successfully")
+        logger.info("Enhanced simulation initialized successfully")
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize simulation during startup: {e}")
+        logger.error(f"Failed to initialize simulation during startup: {e}")
         logger.error(f"Exception details: {str(e)}")
         # Create a minimal fallback simulation to prevent complete failure
         try:
             sim = Simulation(width=6, height=5)
-            logger.warning("⚠️ Created fallback simulation with default parameters")
+            logger.warning("Created fallback simulation with default parameters")
         except Exception as fallback_error:
-            logger.critical(f"💥 Even fallback simulation failed: {fallback_error}")
+            logger.critical(f"Even fallback simulation failed: {fallback_error}")
             sim = None
     
     yield
     
     # Shutdown
-    logger.info("🛑 Shutting down FastAPI application...")
+    logger.info("Shutting down FastAPI application...")
     if sim:
         logger.info("Cleaning up simulation resources...")
         # Add any cleanup logic here if needed
-    logger.info("✅ Shutdown complete")
+    logger.info("Shutdown complete")
 
 app = FastAPI(
     title="Enhanced LangGraph Multiagent Simulation",
@@ -123,9 +123,9 @@ def ensure_simulation():
                 width=int(os.getenv("GRID_WIDTH", 6)),
                 height=int(os.getenv("GRID_HEIGHT", 5))
             )
-            logger.info("✅ Emergency simulation initialization successful")
+            logger.info("Emergency simulation initialization successful")
         except Exception as e:
-            logger.error(f"❌ Emergency simulation initialization failed: {e}")
+            logger.error(f"Emergency simulation initialization failed: {e}")
             raise HTTPException(
                 status_code=500, 
                 detail=f"Simulation initialization failed: {str(e)}"
@@ -208,7 +208,7 @@ async def get_logs():
     """Get simulation logs."""
     try:
         if sim is None:
-            return {"logs": ["⚠️ Simulation not initialized. Use /api/step to initialize."]}
+            return {"logs": ["Simulation not initialized. Use /api/step to initialize."]}
         return {"logs": sim.get_logs()}
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
