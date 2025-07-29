@@ -166,8 +166,12 @@ class Simulation:
                        f"Buildings={flow_state['buildings_built']}, "
                        f"Emergency={flow_state['emergency_mode']}")
             
+
+
             # Run the enhanced conditional flow
-            result_state = self.flow.invoke(flow_state)
+            # result_state = self.flow.invoke(flow_state)
+            result_state = self.flow.invoke(flow_state, thread_id=f"sim-thread-{self.state['step_count']}")
+
 
             # Update our state with the results
             self.state["messages"] = result_state["messages"]

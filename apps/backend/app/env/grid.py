@@ -6,6 +6,7 @@ import random
 from enum import Enum
 from dataclasses import dataclass, field
 import time
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -419,21 +420,50 @@ class Grid:
             path.append(current)
         return path[::-1]
 
+    # def serialize(self) -> Dict:
+    #     """Serialize grid state for API responses"""
+    #     cells = {}
+    #     for (x, y), cell in self.grid.items():
+    #         cells[f"{x},{y}"] = {
+    #             "x": x,
+    #             "y": y,
+    #             "occupied_by": cell.occupied_by,
+    #             "structure": "building" if hasattr(cell.structure, 'built_by') else cell.structure,
+    #             "terrain_type": cell.terrain.terrain_type.value,
+    #             "movement_cost": cell.terrain.movement_cost,
+    #             "can_build": cell.terrain.can_build_on(),
+    #             "resources": {rt.value: dep.amount for rt, dep in cell.terrain.resources.items()}
+    #         }
+        
+    #     return {
+    #         "width": self.width,
+    #         "height": self.height,
+    #         "cells": cells,
+    #         "agent_positions": self.agent_positions,
+    #         "total_cells": len(self.grid)
+    #     }
+
     def serialize(self) -> Dict:
-        """Serialize grid state for API responses"""
         cells = {}
         for (x, y), cell in self.grid.items():
+            movement_cost = (
+                999999 if math.isinf(cell.terrain.movement_cost)
+                else int(cell.terrain.movement_cost)
+            )
+
             cells[f"{x},{y}"] = {
                 "x": x,
                 "y": y,
                 "occupied_by": cell.occupied_by,
                 "structure": "building" if hasattr(cell.structure, 'built_by') else cell.structure,
                 "terrain_type": cell.terrain.terrain_type.value,
-                "movement_cost": cell.terrain.movement_cost,
+                "movement_cost": movement_cost,
                 "can_build": cell.terrain.can_build_on(),
-                "resources": {rt.value: dep.amount for rt, dep in cell.terrain.resources.items()}
+                "resources": {
+                    rt.value: dep.amount for rt, dep in cell.terrain.resources.items()
+                }
             }
-        
+
         return {
             "width": self.width,
             "height": self.height,

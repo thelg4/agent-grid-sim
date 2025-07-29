@@ -622,7 +622,7 @@ def build_agent_flow():
     
     # Compile with checkpointing for state recovery
     try:
-        return graph.compile(checkpointer=checkpointer)
+        return graph.compile(checkpointer=checkpointer, configurable={"thread_id"})
     except Exception as e:
         logger.error(f"Failed to compile graph with checkpointer: {e}")
         # Fallback to compilation without checkpointer
