@@ -108,7 +108,13 @@ class Simulation:
             "strategic_plan_ready": False,
             "last_activity": {"scout": "none", "strategist": "none", "builder": "none"},
             "phase_transitions": [],
-            "coordination_events": []
+            "coordination_events": [],
+            "error_recovery_attempts": 0,
+            "performance_metrics": {},
+            "parallel_execution_enabled": True,
+            "shared_state": None,
+            "coordination_manager": None,
+            "agent_states": {}
         }
         
         # Add initial mission briefing
@@ -158,7 +164,13 @@ class Simulation:
                 "coordination_needed": self.state["coordination_needed"],
                 "emergency_mode": self.state["emergency_mode"],
                 "last_activity": self.state["last_activity"].copy(),
-                "strategic_plan_ready": self.state["strategic_plan_ready"]
+                "strategic_plan_ready": self.state["strategic_plan_ready"],
+                "shared_state": self.state["shared_state"],
+                "coordination_manager": self.state["coordination_manager"],
+                "agent_states": self.state["agent_states"],
+                "error_recovery_attempts": self.state["error_recovery_attempts"],
+                "performance_metrics": self.state["performance_metrics"],
+                "parallel_execution_enabled": self.state["parallel_execution_enabled"]
             }
             
             logger.info(f"Flow state prepared: Phase={flow_state['mission_phase']}, "
@@ -170,7 +182,7 @@ class Simulation:
 
             # Run the enhanced conditional flow
             # result_state = self.flow.invoke(flow_state)
-            result_state = self.flow.invoke(flow_state, thread_id=f"sim-thread-{self.state['step_count']}")
+            result_state = self.flow.invoke(flow_state, config={"configurable": {"thread_id": f"sim-thread-{self.state['step_count']}"}})
 
 
             # Update our state with the results
@@ -181,6 +193,11 @@ class Simulation:
             self.state["emergency_mode"] = result_state["emergency_mode"]
             self.state["last_activity"] = result_state["last_activity"]
             self.state["strategic_plan_ready"] = result_state.get("strategic_plan_ready", False)
+            self.state["error_recovery_attempts"] = result_state.get("error_recovery_attempts", 0)
+            self.state["performance_metrics"] = result_state.get("performance_metrics", {})
+            self.state["shared_state"] = result_state.get("shared_state")
+            self.state["coordination_manager"] = result_state.get("coordination_manager")
+            self.state["agent_states"] = result_state.get("agent_states", {})
             
             # Sync exploration data after agent movements
             self._sync_exploration_data()

@@ -137,12 +137,12 @@ def initialization_phase(state: AgentState) -> AgentState:
         
         # Send initialization messages
         init_messages = [
-            Message("system", "scout", "Initialize exploration protocols", 
-                   MessageType.COMMAND, MessagePriority.HIGH),
-            Message("system", "strategist", "Initialize strategic planning systems",
-                   MessageType.COMMAND, MessagePriority.HIGH),
-            Message("system", "builder", "Initialize construction capabilities",
-                   MessageType.COMMAND, MessagePriority.HIGH)
+            Message("system", "Initialize exploration protocols", 
+                   MessageType.COMMAND, MessagePriority.HIGH, "scout"),
+            Message("system", "Initialize strategic planning systems",
+                   MessageType.COMMAND, MessagePriority.HIGH, "strategist"),
+            Message("system", "Initialize construction capabilities",
+                   MessageType.COMMAND, MessagePriority.HIGH, "builder")
         ]
         
         for msg in init_messages:
