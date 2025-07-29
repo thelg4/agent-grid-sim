@@ -627,3 +627,7 @@ Always respond with a single action in the specified format."""
             "memory": [m.content for m in self.memory_system.get_recent(MemoryType.SHORT_TERM, limit=5)],
             "position": enhanced_status["position"]
         }
+    
+    def _add_to_memory(self, content: str, importance: float = 1.0, **metadata):
+        """Legacy method for backward compatibility - maps to _store_memory"""
+        self._store_memory(content, MemoryType.SHORT_TERM, importance, **metadata)

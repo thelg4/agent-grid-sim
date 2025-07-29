@@ -1,7 +1,9 @@
+# Fix for apps/backend/app/agents/scout.py
+
 import random
 import logging
 from typing import Optional
-from .base import BaseAgent
+from .base import BaseAgent, MemoryType
 from app.tools.message import Message
 from app.env.grid import Grid
 
@@ -52,7 +54,7 @@ class ScoutAgent(BaseAgent):
                     return self._send_report(report_content)
         except Exception as e:
             logger.warning(f"Scout LLM decision failed: {e}, using fallback behavior")
-            self._add_to_memory(f"LLM failed, using fallback")
+            self._store_memory(f"LLM failed, using fallback", MemoryType.SHORT_TERM)
         
         # Fallback to systematic exploration
         return self._systematic_exploration()
@@ -131,7 +133,7 @@ class ScoutAgent(BaseAgent):
                 self.update_status(f"Moved {direction} to ({new_x}, {new_y})")
                 
                 # Add detailed movement to memory
-                self._add_to_memory(f"Moved {direction}: ({current_pos[0]},{current_pos[1]}) → ({new_x},{new_y})")
+                self._store_memory(f"Moved {direction}: ({current_pos[0]},{current_pos[1]}) → ({new_x},{new_y})", MemoryType.SHORT_TERM)
                 
                 # Update exploration progress
                 exploration_percentage = (len(self.visited_cells) / (self.grid.width * self.grid.height)) * 100
@@ -171,7 +173,7 @@ class ScoutAgent(BaseAgent):
         exploration_percent = (visited_count / total_cells) * 100
         
         # Add observation to memory
-        self._add_to_memory(f"Observed from {current_pos}: {len(findings)} findings")
+        self._store_memory(f"Observed from {current_pos}: {len(findings)} findings", MemoryType.SHORT_TERM)
         
         if findings:
             report = f"SCOUT_REPORT: At {current_pos}, found: {'; '.join(findings)}. Progress: {exploration_percent:.1f}% ({visited_count}/{total_cells})"
@@ -187,7 +189,7 @@ class ScoutAgent(BaseAgent):
     def _send_report(self, content: str) -> Optional[Message]:
         """Send a custom report message."""
         self.update_status("Sending custom report")
-        self._add_to_memory(f"Custom report: {content[:30]}...")
+        self._store_memory(f"Custom report: {content[:30]}...", MemoryType.SHORT_TERM)
         
         # Include exploration progress in custom reports
         visited_count = len(self.visited_cells)

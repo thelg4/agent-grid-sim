@@ -1,3 +1,6 @@
+# Corrected version of apps/backend/app/langgraph/agent_flow.py
+# The key fix is ensuring ALL routing destinations are properly defined
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from app.agents.builder import BuilderAgent
@@ -111,7 +114,7 @@ def route_next_action(state: AgentState) -> str:
         
         # Phase-based routing with enhanced logic
         if phase == "initialization":
-            return "initialization_phase"
+            return "exploration_phase"  # Changed from initialization_phase to avoid loops
         elif phase == "exploration" and exploration < 0.7:
             return "exploration_phase" 
         elif phase == "analysis" or (exploration >= 0.7 and not state["strategic_plan_ready"]):
@@ -145,8 +148,9 @@ def initialization_phase(state: AgentState) -> AgentState:
                    MessageType.COMMAND, MessagePriority.HIGH, "builder")
         ]
         
-        for msg in init_messages:
-            coordination_manager.send_message(msg)
+        if coordination_manager:
+            for msg in init_messages:
+                coordination_manager.send_message(msg)
         
         # Update state
         state["mission_phase"] = "exploration"
@@ -166,12 +170,13 @@ def exploration_phase(state: AgentState) -> AgentState:
     
     try:
         # Execute scout with resource considerations
-        scout_messages = coordination_manager.get_messages_for_agent("scout")
-        result = scout_agent.step(scout_messages)
-        
-        if result:
-            coordination_manager.send_message(result)
-            state["last_activity"]["scout"] = "exploration"
+        if scout_agent and coordination_manager:
+            scout_messages = coordination_manager.get_messages_for_agent("scout")
+            result = scout_agent.step(scout_messages)
+            
+            if result:
+                coordination_manager.send_message(result)
+                state["last_activity"]["scout"] = "exploration"
         
         # Check if we need to transition to analysis
         if state["exploration_progress"] >= 0.7:
@@ -195,17 +200,18 @@ def analysis_phase(state: AgentState) -> AgentState:
     start_time = time.time()
     
     try:
-        strategist_messages = coordination_manager.get_messages_for_agent("strategist")
-        result = strategist_agent.step(strategist_messages)
-        
-        if result:
-            coordination_manager.send_message(result)
-            state["last_activity"]["strategist"] = "analysis"
+        if strategist_agent and coordination_manager:
+            strategist_messages = coordination_manager.get_messages_for_agent("strategist")
+            result = strategist_agent.step(strategist_messages)
             
-            # Check if strategic plan is ready
-            if "STRATEGIC_BUILD_ORDER" in result.content:
-                state["strategic_plan_ready"] = True
-                state["mission_phase"] = "construction"
+            if result:
+                coordination_manager.send_message(result)
+                state["last_activity"]["strategist"] = "analysis"
+                
+                # Check if strategic plan is ready
+                if "STRATEGIC_BUILD_ORDER" in result.content:
+                    state["strategic_plan_ready"] = True
+                    state["mission_phase"] = "construction"
         
         execution_time = time.time() - start_time
         state["performance_metrics"]["analysis_time"] = execution_time
@@ -223,12 +229,13 @@ def construction_phase(state: AgentState) -> AgentState:
     start_time = time.time()
     
     try:
-        builder_messages = coordination_manager.get_messages_for_agent("builder")
-        result = builder_agent.step(builder_messages)
-        
-        if result:
-            coordination_manager.send_message(result)
-            state["last_activity"]["builder"] = "construction"
+        if builder_agent and coordination_manager:
+            builder_messages = coordination_manager.get_messages_for_agent("builder")
+            result = builder_agent.step(builder_messages)
+            
+            if result:
+                coordination_manager.send_message(result)
+                state["last_activity"]["builder"] = "construction"
         
         # Check for completion
         if state["buildings_built"] >= 5:
@@ -255,6 +262,10 @@ def parallel_execution(state: AgentState) -> AgentState:
     start_time = time.time()
     
     try:
+        if not (scout_agent and strategist_agent and builder_agent and coordination_manager):
+            logger.warning("Not all agents initialized for parallel execution")
+            return state
+            
         # Prepare messages for each agent
         scout_messages = coordination_manager.get_messages_for_agent("scout")
         strategist_messages = coordination_manager.get_messages_for_agent("strategist") 
@@ -293,15 +304,16 @@ def coordination_phase(state: AgentState) -> AgentState:
     logger.info("Executing coordination phase")
     
     try:
-        # Detect and resolve conflicts
-        conflicts = coordination_manager.detect_conflicts()
-        
-        for conflict in conflicts:
-            conflict_type = conflict["type"]
-            if conflict_type in coordination_manager.conflict_resolution_strategies:
-                resolution_messages = coordination_manager.conflict_resolution_strategies[conflict_type](conflict)
-                for msg in resolution_messages:
-                    coordination_manager.send_message(msg)
+        if coordination_manager:
+            # Detect and resolve conflicts
+            conflicts = coordination_manager.detect_conflicts()
+            
+            for conflict in conflicts:
+                conflict_type = conflict["type"]
+                if conflict_type in coordination_manager.conflict_resolution_strategies:
+                    resolution_messages = coordination_manager.conflict_resolution_strategies[conflict_type](conflict)
+                    for msg in resolution_messages:
+                        coordination_manager.send_message(msg)
         
         # Update coordination status
         state["coordination_needed"] = False
@@ -319,16 +331,17 @@ def emergency_response(state: AgentState) -> AgentState:
     logger.info("Executing emergency response")
     
     try:
-        # Send emergency messages to all agents
-        emergency_msg = Message(
-            "system", None, "Emergency situation detected - coordinate response",
-            MessageType.COMMAND, MessagePriority.URGENT, requires_ack=True
-        )
-        coordination_manager.send_message(emergency_msg)
+        if coordination_manager:
+            # Send emergency messages to all agents
+            emergency_msg = Message(
+                "system", "Emergency situation detected - coordinate response",
+                MessageType.COMMAND, MessagePriority.URGENT, requires_ack=True
+            )
+            coordination_manager.send_message(emergency_msg)
         
         # Execute all agents in emergency mode
         for agent_name, agent in [("scout", scout_agent), ("strategist", strategist_agent), ("builder", builder_agent)]:
-            if agent:
+            if agent and coordination_manager:
                 messages = coordination_manager.get_messages_for_agent(agent_name)
                 result = agent.step(messages)
                 if result:
@@ -358,11 +371,12 @@ def error_recovery(state: AgentState) -> AgentState:
         state["error_recovery_attempts"] = max(0, state["error_recovery_attempts"] - 1)
         
         # Send recovery messages
-        recovery_msg = Message(
-            "system", None, "System recovery in progress",
-            MessageType.REPORT, MessagePriority.HIGH
-        )
-        coordination_manager.send_message(recovery_msg)
+        if coordination_manager:
+            recovery_msg = Message(
+                "system", "System recovery in progress",
+                MessageType.REPORT, MessagePriority.HIGH
+            )
+            coordination_manager.send_message(recovery_msg)
         
         return state
         
@@ -383,7 +397,7 @@ def optimization_phase(state: AgentState) -> AgentState:
         
         # Execute final coordination between agents
         for agent_name, agent in [("scout", scout_agent), ("strategist", strategist_agent), ("builder", builder_agent)]:
-            if agent:
+            if agent and coordination_manager:
                 messages = coordination_manager.get_messages_for_agent(agent_name)
                 result = agent.step(messages)
                 if result:
@@ -406,11 +420,12 @@ def completion_phase(state: AgentState) -> AgentState:
         state["last_activity"].update({agent: "completed" for agent in ["scout", "strategist", "builder"]})
         
         # Send completion message
-        completion_msg = Message(
-            "system", None, "Mission completed successfully",
-            MessageType.REPORT, MessagePriority.HIGH
-        )
-        coordination_manager.send_message(completion_msg)
+        if coordination_manager:
+            completion_msg = Message(
+                "system", "Mission completed successfully",
+                MessageType.REPORT, MessagePriority.HIGH
+            )
+            coordination_manager.send_message(completion_msg)
         
         return state
         
@@ -475,146 +490,89 @@ def build_agent_flow():
     # Set entry point
     graph.set_entry_point("initialization_phase")
     
+    # Define ALL possible routes as a comprehensive mapping
+    all_routes = {
+        "initialization_phase": "initialization_phase",
+        "exploration_phase": "exploration_phase",
+        "analysis_phase": "analysis_phase",
+        "construction_phase": "construction_phase",
+        "optimization_phase": "optimization_phase",
+        "completion_phase": "completion_phase",
+        "parallel_execution": "parallel_execution",
+        "coordination_phase": "coordination_phase",
+        "emergency_response": "emergency_response",
+        "error_recovery": "error_recovery",
+        "update_metrics": "update_metrics"
+    }
+    
     # Add conditional routing from initialization
     graph.add_conditional_edges(
         "initialization_phase",
         route_next_action,
-        {
-            "exploration_phase": "exploration_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery"
-        }
+        all_routes
     )
     
     # Add conditional routing from exploration
     graph.add_conditional_edges(
         "exploration_phase",
         route_next_action,
-        {
-            "analysis_phase": "analysis_phase",
-            "parallel_execution": "parallel_execution",
-            "coordination_phase": "coordination_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from analysis
     graph.add_conditional_edges(
         "analysis_phase", 
         route_next_action,
-        {
-            "construction_phase": "construction_phase",
-            "parallel_execution": "parallel_execution",
-            "coordination_phase": "coordination_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from construction
     graph.add_conditional_edges(
         "construction_phase",
         route_next_action,
-        {
-            "optimization_phase": "optimization_phase",
-            "parallel_execution": "parallel_execution", 
-            "coordination_phase": "coordination_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from optimization
     graph.add_conditional_edges(
         "optimization_phase",
         route_next_action,
-        {
-            "completion_phase": "completion_phase",
-            "parallel_execution": "parallel_execution",
-            "coordination_phase": "coordination_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from parallel execution
     graph.add_conditional_edges(
         "parallel_execution",
         route_next_action,
-        {
-            "exploration_phase": "exploration_phase",
-            "analysis_phase": "analysis_phase", 
-            "construction_phase": "construction_phase",
-            "coordination_phase": "coordination_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from coordination
     graph.add_conditional_edges(
         "coordination_phase",
         route_next_action,
-        {
-            "exploration_phase": "exploration_phase",
-            "analysis_phase": "analysis_phase",
-            "construction_phase": "construction_phase", 
-            "parallel_execution": "parallel_execution",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from emergency
     graph.add_conditional_edges(
         "emergency_response",
         route_next_action,
-        {
-            "exploration_phase": "exploration_phase",
-            "analysis_phase": "analysis_phase",
-            "construction_phase": "construction_phase",
-            "coordination_phase": "coordination_phase",
-            "error_recovery": "error_recovery",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
     # Add conditional routing from error recovery
     graph.add_conditional_edges(
         "error_recovery",
         route_next_action,
-        {
-            "initialization_phase": "initialization_phase",
-            "exploration_phase": "exploration_phase",
-            "analysis_phase": "analysis_phase",
-            "construction_phase": "construction_phase",
-            "coordination_phase": "coordination_phase",
-            "update_metrics": "update_metrics"
-        }
+        all_routes
     )
     
-    # Update metrics always flows to END or continues based on mission status
+    # Update metrics can route to any phase or END
     graph.add_conditional_edges(
         "update_metrics",
         lambda state: "END" if state["mission_phase"] == "completion" else route_next_action(state),
-        {
-            "exploration_phase": "exploration_phase",
-            "analysis_phase": "analysis_phase", 
-            "construction_phase": "construction_phase",
-            "optimization_phase": "optimization_phase",
-            "parallel_execution": "parallel_execution",
-            "coordination_phase": "coordination_phase",
-            "emergency_response": "emergency_response",
-            "error_recovery": "error_recovery",
-            "END": END
-        }
+        {**all_routes, "END": END}
     )
     
     # Completion phase goes to END
@@ -622,7 +580,7 @@ def build_agent_flow():
     
     # Compile with checkpointing for state recovery
     try:
-        return graph.compile(checkpointer=checkpointer, configurable={"thread_id"})
+        return graph.compile(checkpointer=checkpointer)
     except Exception as e:
         logger.error(f"Failed to compile graph with checkpointer: {e}")
         # Fallback to compilation without checkpointer
