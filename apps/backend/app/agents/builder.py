@@ -2,15 +2,15 @@ from typing import Union, Optional
 import re
 import logging
 from .base import BaseAgent
-from app.tools.message import Message
+from app.tools.message import Message, MessageType, MessagePriority
 from app.env.grid import Grid
 from app.env.entities import Structure
 
 logger = logging.getLogger(__name__)
 
 class BuilderAgent(BaseAgent):
-    def __init__(self, agent_id: str, grid: Grid):
-        super().__init__(agent_id, "builder", grid)
+    def __init__(self, agent_id: str, grid: Grid, coordination_manager=None, shared_state=None):
+        super().__init__(agent_id, "builder", grid, coordination_manager, shared_state)
         self.build_queue = []
         self.buildings_completed = 0
         self.last_built_location = None
@@ -66,9 +66,17 @@ class BuilderAgent(BaseAgent):
                         logger.info(f"Builder close enough to build at ({x}, {y})")
                         if self._attempt_build(x, y):
                             self.last_built_location = (x, y)
-                            return self.send_message(f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({x}, {y})")
+                            return self.send_message(
+                                f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({x}, {y})",
+                                MessageType.REPORT,
+                                MessagePriority.HIGH
+                            )
                         else:
-                            return self.send_message(f"CONSTRUCTION_FAILED: Cannot build at ({x}, {y}) - location unavailable")
+                            return self.send_message(
+                                f"CONSTRUCTION_FAILED: Cannot build at ({x}, {y}) - location unavailable",
+                                MessageType.ERROR,
+                                MessagePriority.HIGH
+                            )
                     else:
                         # Start movement toward target
                         logger.info(f"Builder needs to move to ({x}, {y}), distance: {distance}")
@@ -115,24 +123,44 @@ class BuilderAgent(BaseAgent):
                         self.last_built_location = (target_x, target_y)
                         self.current_target = None
                         self.movement_path = []
-                        return self.send_message(f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({target_x}, {target_y})")
+                        return self.send_message(
+                            f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({target_x}, {target_y})",
+                            MessageType.REPORT,
+                            MessagePriority.HIGH
+                        )
                     else:
                         self.current_target = None
                         self.movement_path = []
-                        return self.send_message(f"CONSTRUCTION_FAILED: Cannot build at ({target_x}, {target_y}) - location unavailable")
+                        return self.send_message(
+                            f"CONSTRUCTION_FAILED: Cannot build at ({target_x}, {target_y}) - location unavailable",
+                            MessageType.ERROR,
+                            MessagePriority.HIGH
+                        )
                 
-                return self.send_message(f"MOVEMENT_PROGRESS: Moving toward ({target_x}, {target_y}) - {len(self.movement_path)} steps remaining")
+                return self.send_message(
+                    f"MOVEMENT_PROGRESS: Moving toward ({target_x}, {target_y}) - {len(self.movement_path)} steps remaining",
+                    MessageType.REPORT,
+                    MessagePriority.NORMAL
+                )
             else:
                 logger.warning(f"Builder movement blocked at {next_pos}")
                 # Clear movement plan if blocked
                 self.current_target = None
                 self.movement_path = []
-                return self.send_message(f"MOVEMENT_FAILED: Path blocked, abandoning build target")
+                return self.send_message(
+                    f"MOVEMENT_FAILED: Path blocked, abandoning build target",
+                    MessageType.ERROR,
+                    MessagePriority.HIGH
+                )
         else:
             logger.warning(f"Next step {next_pos} is blocked or invalid")
             self.current_target = None
             self.movement_path = []
-            return self.send_message(f"MOVEMENT_FAILED: Cannot reach build location")
+            return self.send_message(
+                f"MOVEMENT_FAILED: Cannot reach build location",
+                MessageType.ERROR,
+                MessagePriority.HIGH
+            )
 
     def _calculate_path(self, start: tuple[int, int], target: tuple[int, int]) -> list[tuple[int, int]]:
         """Calculate a simple path from start to target."""
@@ -248,7 +276,11 @@ class BuilderAgent(BaseAgent):
                     logger.info(f"Opportunistic build attempt at current position ({x}, {y})")
                     if self._attempt_build(x, y):
                         self.last_built_location = (x, y)
-                        return self.send_message(f"OPPORTUNISTIC_BUILD: Constructed building at ({x}, {y})")
+                        return self.send_message(
+                            f"OPPORTUNISTIC_BUILD: Constructed building at ({x}, {y})",
+                            MessageType.REPORT,
+                            MessagePriority.NORMAL
+                        )
             
             # Check adjacent spaces for building opportunities
             for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
@@ -259,12 +291,20 @@ class BuilderAgent(BaseAgent):
                         logger.info(f"Opportunistic build attempt at ({nx}, {ny})")
                         if self._attempt_build(nx, ny):
                             self.last_built_location = (nx, ny)
-                            return self.send_message(f"OPPORTUNISTIC_BUILD: Constructed building at ({nx}, {ny})")
+                            return self.send_message(
+                                f"OPPORTUNISTIC_BUILD: Constructed building at ({nx}, {ny})",
+                                MessageType.REPORT,
+                                MessagePriority.NORMAL
+                            )
         
         # Nothing to do
         self.status = "No construction opportunities"
         logger.info("Builder: No construction opportunities found")
-        return self.send_message("Builder standing by: No immediate construction opportunities")
+        return self.send_message(
+            "Builder standing by: No immediate construction opportunities",
+            MessageType.REPORT,
+            MessagePriority.LOW
+        )
 
     def get_status(self) -> dict:
         """Get builder status with construction metrics."""
