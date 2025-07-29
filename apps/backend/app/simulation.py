@@ -150,6 +150,33 @@ class Simulation:
                 self.state["mission_status"] = "TIMEOUT"
                 self.state["logs"].append(f"🚨 MISSION TIMEOUT: Exceeded {SimulationGoals.MAX_STEPS} steps")
             
+            # # Prepare enhanced state for the conditional flow
+            # flow_state: AgentState = {
+            #     "grid": self.grid,
+            #     "messages": self.state["messages"],
+            #     "step_count": step_num,
+            #     "mission_phase": self.state["mission_phase"],
+            #     "objectives": SimulationGoals.get_current_objectives(step_num, self.state["mission_phase"]),
+            #     "exploration_progress": self._calculate_exploration_progress(),
+            #     "buildings_built": self._count_buildings(),
+            #     "active_threats": self.state["active_threats"],
+            #     "resource_constraints": self.state["resource_constraints"],
+            #     "coordination_needed": self.state["coordination_needed"],
+            #     "emergency_mode": self.state["emergency_mode"],
+            #     "last_activity": self.state["last_activity"].copy(),
+            #     "strategic_plan_ready": self.state["strategic_plan_ready"],
+            #     "shared_state": self.state["shared_state"],
+            #     "coordination_manager": self.state["coordination_manager"],
+            #     "agent_states": self.state["agent_states"],
+            #     "error_recovery_attempts": self.state["error_recovery_attempts"],
+            #     "performance_metrics": self.state["performance_metrics"],
+            #     "parallel_execution_enabled": self.state["parallel_execution_enabled"]
+            # }
+            
+            # logger.info(f"Flow state prepared: Phase={flow_state['mission_phase']}, "
+            #            f"Exploration={flow_state['exploration_progress']:.1%}, "
+            #            f"Buildings={flow_state['buildings_built']}, "
+            #            f"Emergency={flow_state['emergency_mode']}")
             # Prepare enhanced state for the conditional flow
             flow_state: AgentState = {
                 "grid": self.grid,
@@ -172,17 +199,47 @@ class Simulation:
                 "performance_metrics": self.state["performance_metrics"],
                 "parallel_execution_enabled": self.state["parallel_execution_enabled"]
             }
-            
+
             logger.info(f"Flow state prepared: Phase={flow_state['mission_phase']}, "
-                       f"Exploration={flow_state['exploration_progress']:.1%}, "
-                       f"Buildings={flow_state['buildings_built']}, "
-                       f"Emergency={flow_state['emergency_mode']}")
+                    f"Exploration={flow_state['exploration_progress']:.1%}, "
+                    f"Buildings={flow_state['buildings_built']}, "
+                    f"Emergency={flow_state['emergency_mode']}")
+
+            # Determine which phase to execute based on current mission phase
+            phase_node_map = {
+                "initialization": "initialization_phase",
+                "exploration": "exploration_phase", 
+                "analysis": "analysis_phase",
+                "construction": "construction_phase",
+                "completion": "completion_phase"
+            }
+
+            current_phase_node = phase_node_map.get(self.state["mission_phase"], "initialization_phase")
+            logger.info(f"Executing phase node: {current_phase_node}")
+
+            # Run the specific phase (this will execute once and return)
+            if current_phase_node == "initialization_phase":
+                from app.langgraph.agent_flow import initialization_phase
+                result_state = initialization_phase(flow_state)
+            elif current_phase_node == "exploration_phase":
+                from app.langgraph.agent_flow import exploration_phase
+                result_state = exploration_phase(flow_state)
+            elif current_phase_node == "analysis_phase":
+                from app.langgraph.agent_flow import analysis_phase
+                result_state = analysis_phase(flow_state)
+            elif current_phase_node == "construction_phase":
+                from app.langgraph.agent_flow import construction_phase
+                result_state = construction_phase(flow_state)
+            else:  # completion_phase
+                from app.langgraph.agent_flow import completion_phase
+                result_state = completion_phase(flow_state)
             
 
 
             # Run the enhanced conditional flow
             # result_state = self.flow.invoke(flow_state)
-            result_state = self.flow.invoke(flow_state, config={"configurable": {"thread_id": f"sim-thread-{self.state['step_count']}"}})
+            # result_state = self.flow.invoke(flow_state, config={"configurable": {"thread_id": f"sim-thread-{self.state['step_count']}"}})
+            result_state = self.flow.invoke(flow_state)
 
 
             # Update our state with the results
