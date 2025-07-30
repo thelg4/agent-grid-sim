@@ -6,6 +6,7 @@ from app.agents.scout import ScoutAgent
 from app.agents.strategist import StrategistAgent
 from app.langgraph.agent_flow import build_agent_flow, AgentState
 from app.tools.message import Message
+from langgraph.pregel import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class Simulation:
         placements = [
             ("scout", (0, 0)),
             ("strategist", (1, 0)), 
-            ("builder", (2, 0))  # Make sure builder has a position!
+            ("builder", (1, 2))  # Make sure builder has a position!
         ]
         
         for agent_id, position in placements:
