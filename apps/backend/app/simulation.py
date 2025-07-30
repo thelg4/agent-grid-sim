@@ -6,7 +6,6 @@ from app.agents.scout import ScoutAgent
 from app.agents.strategist import StrategistAgent
 from app.langgraph.agent_flow import build_agent_flow, AgentState
 from app.tools.message import Message
-from langgraph.pregel import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,28 +62,6 @@ class Simulation:
         # Track exploration properly - this will sync with scout's visited_cells
         self.visited_cells: Set[tuple[int, int]] = set()
         
-        # self.agents = {
-        #     "scout": ScoutAgent("scout", self.grid),
-        #     "strategist": StrategistAgent("strategist", self.grid),
-        #     "builder": BuilderAgent("builder", self.grid),
-        # }
-
-        # # Place agents in starting positions with better spacing
-        # success = []
-        # success.append(self.grid.place_agent("scout", (0, 0)))
-        # success.append(self.grid.place_agent("strategist", (1, 0)))
-        # success.append(self.grid.place_agent("builder", (2, 0)))
-        
-        # # Mark starting positions as visited
-        # self.visited_cells.add((0, 0))
-        # self.visited_cells.add((1, 0))
-        # self.visited_cells.add((2, 0))
-        
-        # # Also mark them in the scout's visited cells
-        # self.agents["scout"].visited_cells.update(self.visited_cells)
-        
-        # if not all(success):
-        #     logger.warning("Some agents could not be placed in initial positions")
         # Initialize agents
         self.agents = {
             "scout": ScoutAgent("scout", self.grid),
