@@ -62,28 +62,62 @@ class Simulation:
         # Track exploration properly - this will sync with scout's visited_cells
         self.visited_cells: Set[tuple[int, int]] = set()
         
+        # self.agents = {
+        #     "scout": ScoutAgent("scout", self.grid),
+        #     "strategist": StrategistAgent("strategist", self.grid),
+        #     "builder": BuilderAgent("builder", self.grid),
+        # }
+
+        # # Place agents in starting positions with better spacing
+        # success = []
+        # success.append(self.grid.place_agent("scout", (0, 0)))
+        # success.append(self.grid.place_agent("strategist", (1, 0)))
+        # success.append(self.grid.place_agent("builder", (2, 0)))
+        
+        # # Mark starting positions as visited
+        # self.visited_cells.add((0, 0))
+        # self.visited_cells.add((1, 0))
+        # self.visited_cells.add((2, 0))
+        
+        # # Also mark them in the scout's visited cells
+        # self.agents["scout"].visited_cells.update(self.visited_cells)
+        
+        # if not all(success):
+        #     logger.warning("Some agents could not be placed in initial positions")
+        # Initialize agents
         self.agents = {
             "scout": ScoutAgent("scout", self.grid),
             "strategist": StrategistAgent("strategist", self.grid),
             "builder": BuilderAgent("builder", self.grid),
         }
 
-        # Place agents in starting positions with better spacing
-        success = []
-        success.append(self.grid.place_agent("scout", (0, 0)))
-        success.append(self.grid.place_agent("strategist", (1, 0)))
-        success.append(self.grid.place_agent("builder", (2, 0)))
+        # FIX: Ensure all agents are properly placed
+        placements = [
+            ("scout", (0, 0)),
+            ("strategist", (1, 0)), 
+            ("builder", (2, 0))  # Make sure builder has a position!
+        ]
         
-        # Mark starting positions as visited
-        self.visited_cells.add((0, 0))
-        self.visited_cells.add((1, 0))
-        self.visited_cells.add((2, 0))
+        for agent_id, position in placements:
+            success = self.grid.place_agent(agent_id, position)
+            if not success:
+                logger.error(f"Failed to place {agent_id} at {position}")
+                # Try alternative position
+                for x in range(width):
+                    for y in range(height):
+                        if self.grid.is_empty(x, y):
+                            success = self.grid.place_agent(agent_id, (x, y))
+                            if success:
+                                logger.info(f"Placed {agent_id} at alternative position ({x}, {y})")
+                                break
+                    if success:
+                        break
         
-        # Also mark them in the scout's visited cells
-        self.agents["scout"].visited_cells.update(self.visited_cells)
-        
-        if not all(success):
-            logger.warning("Some agents could not be placed in initial positions")
+        # Verify all agents have positions
+        for agent_id in self.agents:
+            pos = self.grid.get_agent_position(agent_id)
+            if pos is None:
+                logger.error(f"CRITICAL: {agent_id} has no position after initialization!")
 
         # Initialize enhanced conditional flow
         self.flow = build_agent_flow()

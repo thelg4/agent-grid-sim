@@ -158,6 +158,43 @@ def analysis_phase(state: AgentState) -> AgentState:
         state["strategic_plan_ready"] = True
         return state
 
+# def construction_phase(state: AgentState) -> AgentState:
+#     """Execute ONE construction step"""
+#     logger.info("Executing construction phase")
+    
+#     try:
+#         if builder_agent and coordination_manager:
+#             builder_messages = coordination_manager.get_messages_for_agent("builder")
+#             result_message = builder_agent.step(builder_messages)
+            
+#             if result_message:
+#                 # Add the message to our state messages
+#                 state["messages"].append(result_message)
+#                 coordination_manager.send_message(result_message)
+#                 state["last_activity"]["builder"] = "construction"
+#                 logger.info(f"Builder generated message: {result_message.content}")
+        
+#         # Update buildings count
+#         state["buildings_built"] = _count_buildings(state["grid"])
+        
+#         logger.info(f"Construction step complete. Buildings: {state['buildings_built']}")
+        
+#         # Check if we should transition to completion
+#         if state["buildings_built"] >= 5:
+#             state["mission_phase"] = "completion"
+#             logger.info("Building target reached, transitioning to completion")
+#         # Otherwise, cycle back to get more strategic orders
+#         elif state["step_count"] % 3 == 0:  # Every 3rd step, go back to analysis for new orders
+#             state["mission_phase"] = "analysis"
+#             logger.info("Cycling back to analysis for new strategic orders")
+        
+# #         return state
+
+        
+#     except Exception as e:
+#         logger.error(f"Construction phase error: {e}")
+#         return state
+
 def construction_phase(state: AgentState) -> AgentState:
     """Execute ONE construction step"""
     logger.info("Executing construction phase")
@@ -168,7 +205,6 @@ def construction_phase(state: AgentState) -> AgentState:
             result_message = builder_agent.step(builder_messages)
             
             if result_message:
-                # Add the message to our state messages
                 state["messages"].append(result_message)
                 coordination_manager.send_message(result_message)
                 state["last_activity"]["builder"] = "construction"
@@ -179,12 +215,15 @@ def construction_phase(state: AgentState) -> AgentState:
         
         logger.info(f"Construction step complete. Buildings: {state['buildings_built']}")
         
-        # Check if we should transition to completion
+        # ADD THIS: Better phase transition logic
         if state["buildings_built"] >= 5:
             state["mission_phase"] = "completion"
             logger.info("Building target reached, transitioning to completion")
-        # Otherwise, cycle back to get more strategic orders
-        elif state["step_count"] % 3 == 0:  # Every 3rd step, go back to analysis for new orders
+        elif "No construction opportunities" in result_message.content:
+            # If builder can't build, go back to analysis for new strategy
+            state["mission_phase"] = "analysis"
+            logger.info("Builder blocked, returning to analysis phase")
+        elif state["step_count"] % 3 == 0:  # Every 3rd step, get new orders
             state["mission_phase"] = "analysis"
             logger.info("Cycling back to analysis for new strategic orders")
         
@@ -192,6 +231,8 @@ def construction_phase(state: AgentState) -> AgentState:
         
     except Exception as e:
         logger.error(f"Construction phase error: {e}")
+        # ON ERROR: Don't loop, go to completion
+        state["mission_phase"] = "completion"
         return state
 
 def completion_phase(state: AgentState) -> AgentState:
@@ -212,11 +253,35 @@ def completion_phase(state: AgentState) -> AgentState:
     
     return state
 
+# def route_phase(state: AgentState) -> str:
+#     """Route to the appropriate phase based on current mission phase"""
+#     phase = state["mission_phase"]
+    
+#     logger.info(f"Routing to phase: {phase}")
+    
+#     if phase == "initialization":
+#         return "initialization_phase"
+#     elif phase == "exploration":
+#         return "exploration_phase"
+#     elif phase == "analysis":
+#         return "analysis_phase"
+#     elif phase == "construction":
+#         return "construction_phase"
+#     elif phase == "completion":
+#         return "completion_phase"
+#     else:
+#         return "completion_phase"  # Default fallback
 def route_phase(state: AgentState) -> str:
     """Route to the appropriate phase based on current mission phase"""
     phase = state["mission_phase"]
+    step_count = state.get("step_count", 0)
     
     logger.info(f"Routing to phase: {phase}")
+    
+    # ADD THIS: Circuit breaker for infinite loops
+    if step_count > 40:  # Emergency fallback
+        logger.warning(f"Step count {step_count} exceeds safety limit, forcing completion")
+        return "completion_phase"
     
     if phase == "initialization":
         return "initialization_phase"

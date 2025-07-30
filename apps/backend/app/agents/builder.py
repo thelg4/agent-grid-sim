@@ -18,11 +18,105 @@ class BuilderAgent(BaseAgent):
         self.current_target = None  # Track current movement target
         self.movement_path = []  # Path to target
 
+    # def step(self, messages: list[Message]) -> Optional[Message]:
+    #     """
+    #     Process strategic build orders and execute construction.
+    #     """
+    #     logger.info(f"Builder step starting - total messages: {len(messages)}")
+        
+    #     # If we're already moving toward a target, continue that first
+    #     if self.current_target and self.movement_path:
+    #         return self._continue_movement()
+        
+    #     # Find the MOST RECENT strategic build order from this step
+    #     latest_strategic_order = None
+        
+    #     # Process messages in reverse order to get the most recent first
+    #     for message in reversed(messages):
+    #         if (hasattr(message, 'sender') and 
+    #             message.sender == "strategist" and 
+    #             "STRATEGIC_BUILD_ORDER" in message.content):
+                
+    #             # Create a unique message ID to avoid processing the same message twice
+    #             message_id = f"{message.sender}_{message.content}_{len(messages)}"
+                
+    #             if message_id not in self.processed_messages:
+    #                 latest_strategic_order = message
+    #                 self.processed_messages.add(message_id)
+    #                 logger.info(f"Builder found NEW strategic order: {message.content}")
+    #                 break
+    #             else:
+    #                 logger.info(f"Builder skipping already processed message: {message.content}")
+        
+    #     # Process the latest strategic order
+    #     if latest_strategic_order:
+    #         coords = self._extract_coordinates_from_message(latest_strategic_order.content)
+            
+    #         if coords:
+    #             x, y = coords
+    #             logger.info(f"Builder processing NEW coordinates: ({x}, {y})")
+                
+    #             # Check if we can build immediately (already at location or adjacent)
+    #             current_pos = self.grid.get_agent_position(self.agent_id)
+    #             if current_pos:
+    #                 current_x, current_y = current_pos
+    #                 distance = abs(x - current_x) + abs(y - current_y)
+                    
+    #                 if distance <= 1:  # At location or adjacent
+    #                     logger.info(f"Builder close enough to build at ({x}, {y})")
+    #                     if self._attempt_build(x, y):
+    #                         self.last_built_location = (x, y)
+    #                         return self.send_message(
+    #                             f"CONSTRUCTION_COMPLETE: Strategic building constructed at ({x}, {y})",
+    #                             MessageType.REPORT,
+    #                             MessagePriority.HIGH
+    #                         )
+    #                     else:
+    #                         return self.send_message(
+    #                             f"CONSTRUCTION_FAILED: Cannot build at ({x}, {y}) - location unavailable",
+    #                             MessageType.ERROR,
+    #                             MessagePriority.HIGH
+    #                         )
+    #                 else:
+    #                     # Start movement toward target
+    #                     logger.info(f"Builder needs to move to ({x}, {y}), distance: {distance}")
+    #                     self.current_target = (x, y)
+    #                     self.movement_path = self._calculate_path(current_pos, (x, y))
+    #                     return self._continue_movement()
+    #         else:
+    #             logger.warning(f"Failed to extract coordinates from: {latest_strategic_order.content}")
+    #     else:
+    #         logger.info("Builder: No new strategic orders found")
+
+    #     # If no strategic orders processed, try opportunistic building
+    #     return self._opportunistic_build()
     def step(self, messages: list[Message]) -> Optional[Message]:
         """
         Process strategic build orders and execute construction.
         """
         logger.info(f"Builder step starting - total messages: {len(messages)}")
+        
+        # ADD THIS: Check if builder has a position
+        current_pos = self.grid.get_agent_position(self.agent_id)
+        if current_pos is None:
+            logger.error("Builder has no position! Attempting emergency placement...")
+            # Try to place builder somewhere
+            for x in range(self.grid.width):
+                for y in range(self.grid.height):
+                    if self.grid.is_empty(x, y):
+                        if self.grid.place_agent(self.agent_id, (x, y)):
+                            logger.info(f"Emergency placement: Builder placed at ({x}, {y})")
+                            current_pos = (x, y)
+                            break
+                if current_pos:
+                    break
+            
+            if current_pos is None:
+                return self.send_message(
+                    "CRITICAL_ERROR: Builder has no position and grid is full",
+                    MessageType.ERROR,
+                    MessagePriority.URGENT
+                )
         
         # If we're already moving toward a target, continue that first
         if self.current_target and self.movement_path:
